@@ -446,12 +446,51 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (activeTool === 'text') {
       const pos = getCanvasCoords(e);
-      const text = prompt('Enter annotation text:');
-      if (text) {
-        drawCtx.font = `bold ${Math.max(16, currentLineWidth * 4)}px ui-monospace, monospace`;
-        drawCtx.fillStyle = currentColor;
-        drawCtx.fillText(text, pos.x, pos.y);
-      }
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Type note and press Enter...';
+      input.style.cssText = `
+        position: fixed;
+        left: ${e.clientX}px;
+        top: ${e.clientY}px;
+        z-index: 1000;
+        background: #14161c;
+        color: ${currentColor};
+        border: 1px solid ${currentColor};
+        font-family: ui-monospace, monospace;
+        font-size: ${Math.max(14, currentLineWidth * 3.5)}px;
+        font-weight: bold;
+        padding: 4px 8px;
+        border-radius: 4px;
+        outline: none;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+      `;
+      document.body.appendChild(input);
+      input.focus();
+
+      let committed = false;
+      const commit = () => {
+        if (committed) return;
+        committed = true;
+        const val = input.value.trim();
+        if (val) {
+          drawCtx.font = `bold ${Math.max(16, currentLineWidth * 4)}px ui-monospace, monospace`;
+          drawCtx.fillStyle = currentColor;
+          drawCtx.fillText(val, pos.x, pos.y);
+          pushUndoState();
+        }
+        input.remove();
+      };
+
+      input.addEventListener('keydown', (ke) => {
+        if (ke.key === 'Enter') commit();
+        if (ke.key === 'Escape') {
+          committed = true;
+          input.remove();
+        }
+      });
+      input.addEventListener('blur', commit);
+      return;
     }
 
     pushUndoState();
