@@ -7,7 +7,10 @@
 import { calculateSlices } from '../utils/stitch.js';
 import { generateFilename } from '../utils/format.js';
 
-// Clean up old capture sessions from storage on startup
+// Fast in-memory capture store to ensure reliable viewer access across storage quotas
+const memoryCaptures = new Map();
+
+// Clean up old capture sessions from storage and memory on startup
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('Sprocket service worker installed.');
   await cleanOldCaptures();
@@ -153,16 +156,16 @@ async function ensureContentScript(tabId) {
 
 // Minimum interval between captureVisibleTab calls to strictly respect Chromium's
 // MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.
-// Chromium's token bucket allows 1 call per second. 1050ms guarantees strictly < 1 call/sec.
-const MIN_CAPTURE_INTERVAL_MS = 1050;
+// 1150ms guarantees strictly < 1 call/sec token bucket safety margin.
+const MIN_CAPTURE_INTERVAL_MS = 1150;
 let lastCaptureTimestamp = 0;
 let activeCaptureSession = null;
 
 /**
  * Throttled and fault-tolerant captureVisibleTab wrapper.
- * Strictly throttles call rate and automatically retries with backoff if quota is hit.
+ * Throttles call rate and automatically retries with backoff if quota or window issues occur.
  */
-async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxRetries = 4) {
+async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxRetries = 5) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const now = Date.now();
     const elapsed = now - lastCaptureTimestamp;
@@ -173,7 +176,16 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
 
     try {
       lastCaptureTimestamp = Date.now();
-      return await chrome.tabs.captureVisibleTab(windowId, options);
+      if (windowId) {
+        try {
+          return await chrome.tabs.captureVisibleTab(windowId, options);
+        } catch (winErr) {
+          // If specified windowId throws, fallback to active current window
+          return await chrome.tabs.captureVisibleTab(null, options);
+        }
+      } else {
+        return await chrome.tabs.captureVisibleTab(null, options);
+      }
     } catch (err) {
       const msg = err?.message || String(err);
       const isQuota = msg.includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND') ||
@@ -181,10 +193,15 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
                       msg.includes('MAX_CAPTURE');
 
       if (isQuota && attempt < maxRetries) {
-        const backoffMs = 1500 + attempt * 500;
-        console.warn(`Sprocket: Quota limit touched. Recharging token bucket for ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+        const backoffMs = 2000 + attempt * 500;
+        console.warn(`Sprocket: Quota touched. Recharging token bucket for ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         lastCaptureTimestamp = Date.now();
+        continue;
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
         continue;
       }
 
@@ -252,7 +269,7 @@ async function captureFullPage(tab) {
         console.debug('Tab focus check:', e);
       }
 
-      // Broadcast progress update to popup and HUD
+      // Broadcast progress update
       chrome.runtime.sendMessage({
         action: 'SPROCKET_PROGRESS_UPDATE',
         currentFrame: i + 1,
@@ -295,11 +312,22 @@ async function captureFullPage(tab) {
       }
 
       // Capture frame safely respecting Chromium rate limit
-      const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
-      capturedFrames.push({
-        descriptor: slice,
-        dataUrl
-      });
+      try {
+        const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
+        capturedFrames.push({
+          descriptor: slice,
+          dataUrl
+        });
+      } catch (captureErr) {
+        console.warn(`Sprocket: Frame ${i + 1}/${slices.length} capture error:`, captureErr);
+        // If we already have captured frames, break and finish with what we have instead of dying
+        if (capturedFrames.length > 0) {
+          console.log(`Sprocket: Preserving ${capturedFrames.length} captured frames and proceeding to stitch.`);
+          break;
+        } else {
+          throw captureErr;
+        }
+      }
     }
 
     // Broadcast 100% progress
@@ -311,7 +339,7 @@ async function captureFullPage(tab) {
     }).catch(() => {});
   } finally {
     activeCaptureSession = null;
-    // 4. Always restore page state
+    // Always restore page state
     try {
       await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_RESTORE' });
     } catch (e) {
@@ -328,7 +356,7 @@ async function captureFullPage(tab) {
   const actualCoveredHeight = (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight) / (telemetry.dpr || 1);
   telemetry.totalHeight = actualCoveredHeight;
 
-  // 5. Store capture job
+  // 5. Store capture job in memory AND local storage
   const payload = {
     id: captureId,
     mode: 'full',
@@ -337,10 +365,21 @@ async function captureFullPage(tab) {
     createdAt: Date.now()
   };
 
-  await chrome.storage.local.set({ [captureId]: payload });
+  memoryCaptures.set(captureId, payload);
 
-  // 6. Open Studio Viewer
-  await openViewer(captureId);
+  try {
+    await chrome.storage.local.set({ [captureId]: payload });
+  } catch (storageErr) {
+    console.warn('Sprocket: Local storage write failed (falling back to memory cache):', storageErr);
+  }
+
+  // 6. ALWAYS Open Studio Viewer
+  try {
+    await openViewer(captureId);
+  } catch (viewerErr) {
+    console.error('Sprocket: Failed to open viewer tab:', viewerErr);
+  }
+
   return { success: true, captureId };
 }
 
@@ -382,7 +421,14 @@ async function captureVisibleViewport(tab) {
     createdAt: Date.now()
   };
 
-  await chrome.storage.local.set({ [captureId]: payload });
+  memoryCaptures.set(captureId, payload);
+
+  try {
+    await chrome.storage.local.set({ [captureId]: payload });
+  } catch (storageErr) {
+    console.warn('Sprocket: Viewport storage write issue:', storageErr);
+  }
+
   await openViewer(captureId);
   return { success: true, captureId };
 }
@@ -426,7 +472,14 @@ async function handleRegionSelected(tab, rect, title, url) {
     createdAt: Date.now()
   };
 
-  await chrome.storage.local.set({ [captureId]: payload });
+  memoryCaptures.set(captureId, payload);
+
+  try {
+    await chrome.storage.local.set({ [captureId]: payload });
+  } catch (storageErr) {
+    console.warn('Sprocket: Region storage write issue:', storageErr);
+  }
+
   await openViewer(captureId);
 }
 
@@ -435,7 +488,7 @@ async function handleRegionSelected(tab, rect, title, url) {
  */
 async function openViewer(captureId) {
   const viewerUrl = chrome.runtime.getURL(`src/viewer/viewer.html?id=${encodeURIComponent(captureId)}`);
-  await chrome.tabs.create({ url: viewerUrl, active: true });
+  return await chrome.tabs.create({ url: viewerUrl, active: true });
 }
 
 // Global Hotkey / Command Listener
@@ -541,9 +594,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'SPROCKET_GET_CAPTURE_DATA': {
           const captureId = message.captureId;
-          const record = await chrome.storage.local.get(captureId);
-          if (record && record[captureId]) {
-            sendResponse({ success: true, capture: record[captureId] });
+          let record = memoryCaptures.get(captureId);
+          if (!record) {
+            const stored = await chrome.storage.local.get(captureId);
+            record = stored && stored[captureId];
+          }
+          if (record) {
+            sendResponse({ success: true, capture: record });
           } else {
             sendResponse({ success: false, error: 'Capture record not found.' });
           }

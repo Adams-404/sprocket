@@ -70,9 +70,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // 2. Fetch Capture Record from Storage
-  const record = await chrome.storage.local.get(captureId);
-  currentCapture = record[captureId];
+  // 2. Fetch Capture Record from Background Memory or Storage
+  try {
+    const res = await chrome.runtime.sendMessage({
+      action: 'SPROCKET_GET_CAPTURE_DATA',
+      captureId
+    });
+    if (res && res.success && res.capture) {
+      currentCapture = res.capture;
+    }
+  } catch (e) {
+    console.debug('Background memory query:', e);
+  }
+
+  if (!currentCapture) {
+    const record = await chrome.storage.local.get(captureId);
+    currentCapture = record && record[captureId];
+  }
 
   if (!currentCapture) {
     showToast('Capture session expired or missing', 'error');
@@ -145,10 +159,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Pre-decode all frames
     const loadedSlices = await Promise.all(
       slices.map((slice) => {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
           const img = new Image();
           img.onload = () => resolve({ img, descriptor: slice.descriptor });
-          img.onerror = reject;
+          img.onerror = () => {
+            console.warn('Sprocket: Frame decode error, skipping corrupted slice');
+            resolve({ img: null, descriptor: slice.descriptor });
+          };
           img.src = slice.dataUrl;
         });
       })
@@ -156,6 +173,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Draw slices in sequence
     for (const item of loadedSlices) {
+      if (!item.img) continue;
       const d = item.descriptor;
       outCtx.drawImage(
         item.img,
