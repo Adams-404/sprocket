@@ -72,6 +72,50 @@ async function ensureContentScript(tabId) {
   return response.telemetry;
 }
 
+// Minimum interval between captureVisibleTab calls to strictly respect Chromium's
+// MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota (which is 2 calls/sec).
+// 650ms guarantees <= 1.54 calls/sec, with plenty of margin.
+const MIN_CAPTURE_INTERVAL_MS = 650;
+let lastCaptureTimestamp = 0;
+
+/**
+ * Throttled and fault-tolerant captureVisibleTab wrapper.
+ * Strictly throttles call rate and automatically retries with backoff if quota is hit.
+ */
+async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxRetries = 4) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // 1. Enforce minimum spacing between calls
+    const now = Date.now();
+    const elapsed = now - lastCaptureTimestamp;
+    if (elapsed < MIN_CAPTURE_INTERVAL_MS) {
+      const waitTime = MIN_CAPTURE_INTERVAL_MS - elapsed;
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+
+    try {
+      lastCaptureTimestamp = Date.now();
+      return await chrome.tabs.captureVisibleTab(windowId, options);
+    } catch (err) {
+      const msg = err?.message || String(err);
+      const isQuota = msg.includes('MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND') ||
+                      msg.includes('quota') ||
+                      msg.includes('MAX_CAPTURE');
+
+      if (isQuota && attempt < maxRetries) {
+        // Progressive backoff: 800ms, 1200ms, 1600ms, 2000ms
+        const backoffMs = 800 + attempt * 400;
+        console.warn(`Sprocket: Capture quota reached. Backing off ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        lastCaptureTimestamp = Date.now();
+        continue;
+      }
+
+      // If not a quota error or out of retries, rethrow
+      throw err;
+    }
+  }
+}
+
 /**
  * Captures the entire scrollable page through sequential frame advancement.
  */
@@ -102,6 +146,14 @@ async function captureFullPage(tab) {
       const slice = slices[i];
       const isFirst = i === 0;
 
+      // Broadcast progress update to popup
+      chrome.runtime.sendMessage({
+        action: 'SPROCKET_PROGRESS_UPDATE',
+        currentFrame: i + 1,
+        totalFrames: slices.length,
+        percent: Math.round(((i) / slices.length) * 100)
+      }).catch(() => {});
+
       // Scroll viewport into position
       await chrome.tabs.sendMessage(tab.id, {
         action: 'SPROCKET_SCROLL_TO',
@@ -111,13 +163,21 @@ async function captureFullPage(tab) {
         totalFrames: slices.length
       });
 
-      // Capture frame
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      // Capture frame safely respecting Chromium rate limit
+      const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
       capturedFrames.push({
         descriptor: slice,
         dataUrl
       });
     }
+
+    // Broadcast 100% progress
+    chrome.runtime.sendMessage({
+      action: 'SPROCKET_PROGRESS_UPDATE',
+      currentFrame: slices.length,
+      totalFrames: slices.length,
+      percent: 100
+    }).catch(() => {});
   } finally {
     // 4. Always restore page state
     try {
@@ -167,7 +227,7 @@ async function captureVisibleViewport(tab) {
     };
   }
 
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
   const captureId = `sprocket_capture_${Date.now()}`;
 
   const payload = {
@@ -203,7 +263,7 @@ async function startRegionSelector(tab) {
  * Handles region selection completion from selector.js.
  */
 async function handleRegionSelected(tab, rect, title, url) {
-  const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
   const captureId = `sprocket_capture_${Date.now()}`;
 
   const payload = {

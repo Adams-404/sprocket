@@ -137,18 +137,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     progressPercent.textContent = '20%';
   }
 
+  const errorBanner = document.getElementById('error-banner');
+  const errorTitle = document.getElementById('error-title');
+  const errorMessage = document.getElementById('error-message');
+  const btnErrorClose = document.getElementById('btn-error-close');
+
+  function showError(msg, title = 'CAPTURE ERROR') {
+    errorTitle.textContent = title;
+    errorMessage.textContent = msg;
+    errorBanner.style.display = 'flex';
+    setReadyState();
+    progressPanel.style.display = 'none';
+  }
+
+  function hideError() {
+    errorBanner.style.display = 'none';
+  }
+
+  btnErrorClose.addEventListener('click', hideError);
+
+  // Listen for real-time progress updates from service worker
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.action === 'SPROCKET_PROGRESS_UPDATE') {
+      progressFill.style.width = `${message.percent}%`;
+      progressPercent.textContent = `${message.percent}%`;
+      progressStatus.textContent = `FRAME [${message.currentFrame}/${message.totalFrames}]...`;
+    }
+  });
+
   // --- Button Handlers ---
 
   // Full Page Capture
   btnCaptureFull.addEventListener('click', async () => {
     if (!currentTab) return;
+    hideError();
     playShutterSound({ enabled: soundEnabled });
     setBusyState('STITCHING FRAMES...');
 
     try {
-      progressFill.style.width = '60%';
-      progressPercent.textContent = '60%';
-
       const res = await chrome.runtime.sendMessage({
         action: 'SPROCKET_START_FULL_CAPTURE',
         tabId: currentTab.id
@@ -159,47 +185,51 @@ document.addEventListener('DOMContentLoaded', async () => {
         progressPercent.textContent = '100%';
         setTimeout(() => window.close(), 250);
       } else {
-        alert(res?.error || 'Full-page capture encountered an error.');
-        setReadyState();
-        progressPanel.style.display = 'none';
+        showError(res?.error || 'Full-page capture encountered an error.');
       }
     } catch (err) {
-      alert(`Capture failed: ${err.message || err}`);
-      setReadyState();
-      progressPanel.style.display = 'none';
+      showError(err.message || String(err), 'CAPTURE FAILED');
     }
   });
 
   // Visible Viewport Capture
   btnCaptureViewport.addEventListener('click', async () => {
     if (!currentTab) return;
+    hideError();
     playShutterSound({ enabled: soundEnabled });
     setBusyState('CAPTURING VIEWPORT...');
 
     try {
-      await chrome.runtime.sendMessage({
+      const res = await chrome.runtime.sendMessage({
         action: 'SPROCKET_START_VISIBLE_CAPTURE',
         tabId: currentTab.id
       });
-      window.close();
+      if (res && res.success) {
+        window.close();
+      } else {
+        showError(res?.error || 'Viewport capture failed.');
+      }
     } catch (err) {
-      alert(`Viewport capture failed: ${err.message || err}`);
-      setReadyState();
+      showError(err.message || String(err), 'VIEWPORT FAILED');
     }
   });
 
   // Region Selector
   btnCaptureRegion.addEventListener('click', async () => {
     if (!currentTab) return;
+    hideError();
     try {
-      await chrome.runtime.sendMessage({
+      const res = await chrome.runtime.sendMessage({
         action: 'SPROCKET_START_REGION_CAPTURE',
         tabId: currentTab.id
       });
-      // Close popup immediately so user can select region on the actual web page
-      window.close();
+      if (res && res.success) {
+        window.close();
+      } else {
+        showError(res?.error || 'Could not launch selector.');
+      }
     } catch (err) {
-      alert(`Region selector failed: ${err.message || err}`);
+      showError(err.message || String(err), 'SELECTOR FAILED');
     }
   });
 });

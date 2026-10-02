@@ -130,7 +130,7 @@
     // Yield for DOM repaint & dynamic component rendering
     await new Promise((resolve) => {
       requestAnimationFrame(() => {
-        setTimeout(resolve, 150);
+        setTimeout(resolve, 200);
       });
     });
   }
