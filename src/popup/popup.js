@@ -57,16 +57,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     await chrome.storage.local.set({ sprocket_format: selectFormat.value });
   });
 
-  // 2. Query active tab and telemetry
-  try {
-    const response = await chrome.runtime.sendMessage({ action: 'SPROCKET_GET_ACTIVE_TELEMETRY' });
+  function isSupportedUrl(url) {
+    if (!url) return false;
+    return !/^(chrome|brave|edge|about|devtools|chrome-extension):/i.test(url) &&
+           !url.startsWith('https://chrome.google.com/webstore') &&
+           !url.startsWith('https://chromewebstore.google.com');
+  }
 
-    if (!response || !response.success) {
+  // 2. Query active tab directly from popup window context
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab || !tab.id || !isSupportedUrl(tab.url)) {
       handleUnsupportedPage();
       return;
     }
 
-    currentTab = response.tab;
+    currentTab = tab;
+
+    const response = await chrome.runtime.sendMessage({
+      action: 'SPROCKET_GET_TAB_TELEMETRY',
+      tabId: tab.id
+    });
+
+    if (!response || !response.success || !response.telemetry) {
+      handleUnsupportedPage();
+      return;
+    }
+
     currentTelemetry = response.telemetry;
 
     // Display host and title

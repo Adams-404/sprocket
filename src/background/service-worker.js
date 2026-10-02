@@ -125,6 +125,14 @@ async function captureFullPage(tab) {
     throw new Error('Cannot capture browser internal pages or protected URLs.');
   }
 
+  // Ensure target tab and its window are active and focused
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+  } catch (e) {
+    console.debug('Failed to focus tab/window:', e);
+  }
+
   // 1. Get telemetry
   const telemetry = await ensureContentScript(tab.id);
 
@@ -155,6 +163,17 @@ async function captureFullPage(tab) {
 
       const slice = slices[i];
       const isFirst = i === 0;
+
+      // Ensure target tab is in the foreground of its window before captureVisibleTab
+      try {
+        const [activeInWin] = await chrome.tabs.query({ active: true, windowId: tab.windowId });
+        if (!activeInWin || activeInWin.id !== tab.id) {
+          await chrome.tabs.update(tab.id, { active: true });
+          await new Promise((r) => setTimeout(r, 150));
+        }
+      } catch (e) {
+        console.debug('Tab focus check:', e);
+      }
 
       // Broadcast progress update to popup and HUD
       chrome.runtime.sendMessage({
@@ -246,6 +265,13 @@ async function captureVisibleViewport(tab) {
     };
   }
 
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+  } catch (e) {
+    console.debug('Failed to focus tab/window:', e);
+  }
+
   const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
   const captureId = `sprocket_capture_${Date.now()}`;
 
@@ -314,7 +340,8 @@ async function openViewer(captureId) {
 
 // Global Hotkey / Command Listener
 chrome.commands.onCommand.addListener(async (command) => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Use lastFocusedWindow: true because service workers are headless
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab || !tab.id) return;
 
   try {
@@ -336,11 +363,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   (async () => {
     try {
-      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      // Helper to safely get the target tab
+      async function resolveTargetTab() {
+        if (message.tabId) {
+          try {
+            return await chrome.tabs.get(message.tabId);
+          } catch {
+            // fall back
+          }
+        }
+        if (sender.tab) return sender.tab;
+        const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+        return active;
+      }
 
       switch (message.action) {
+        case 'SPROCKET_GET_TAB_TELEMETRY': {
+          const targetTab = await resolveTargetTab();
+          if (!targetTab || !isSupportedUrl(targetTab.url)) {
+            sendResponse({ success: false, reason: 'unsupported' });
+            return;
+          }
+          const telemetry = await ensureContentScript(targetTab.id);
+          sendResponse({ success: true, telemetry, tab: targetTab });
+          break;
+        }
+
         case 'SPROCKET_START_FULL_CAPTURE': {
-          const tab = message.tabId ? await chrome.tabs.get(message.tabId) : activeTab;
+          const tab = await resolveTargetTab();
+          if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await captureFullPage(tab);
           sendResponse(result);
           break;
@@ -356,21 +407,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_START_VISIBLE_CAPTURE': {
-          const tab = message.tabId ? await chrome.tabs.get(message.tabId) : activeTab;
+          const tab = await resolveTargetTab();
+          if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await captureVisibleViewport(tab);
           sendResponse(result);
           break;
         }
 
         case 'SPROCKET_START_REGION_CAPTURE': {
-          const tab = message.tabId ? await chrome.tabs.get(message.tabId) : activeTab;
+          const tab = await resolveTargetTab();
+          if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await startRegionSelector(tab);
           sendResponse(result);
           break;
         }
 
         case 'SPROCKET_REGION_SELECTED': {
-          const tab = sender.tab || activeTab;
+          const tab = sender.tab || (await resolveTargetTab());
           await handleRegionSelected(tab, message.rect, message.title, message.url);
           sendResponse({ success: true });
           break;
@@ -388,12 +441,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_GET_ACTIVE_TELEMETRY': {
-          if (!activeTab || !isSupportedUrl(activeTab.url)) {
+          const tab = await resolveTargetTab();
+          if (!tab || !isSupportedUrl(tab.url)) {
             sendResponse({ success: false, reason: 'unsupported' });
             return;
           }
-          const telemetry = await ensureContentScript(activeTab.id);
-          sendResponse({ success: true, telemetry, tab: activeTab });
+          const telemetry = await ensureContentScript(tab.id);
+          sendResponse({ success: true, telemetry, tab });
           break;
         }
 
