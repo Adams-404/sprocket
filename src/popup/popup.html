@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sprocket</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="sprocket-shell">
+    <!-- Header with Mechanical Branding & Status LED -->
+    <header class="sprocket-header">
+      <div class="brand">
+        <div class="brand-glyph">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">SPROCKET</span>
+          <span class="brand-sub">MK-I PRECISION CAPTURE</span>
+        </div>
+      </div>
+      <div class="status-indicator" id="status-pill" title="Hardware Status: Ready">
+        <span class="status-dot"></span>
+        <span class="status-label" id="status-label">READY</span>
+      </div>
+    </header>
+
+    <!-- Telemetry Readout Grid -->
+    <section class="telemetry-panel" id="telemetry-panel">
+      <div class="telemetry-row">
+        <span class="telemetry-key">SOURCE</span>
+        <span class="telemetry-val truncate" id="telemetry-host">Resolving tab...</span>
+      </div>
+      <div class="telemetry-metrics">
+        <div class="metric-cell">
+          <span class="metric-label">CANVAS SIZE</span>
+          <span class="metric-val" id="metric-canvas">-- × --</span>
+        </div>
+        <div class="metric-cell">
+          <span class="metric-label">FRAMES</span>
+          <span class="metric-val" id="metric-frames">--</span>
+        </div>
+        <div class="metric-cell">
+          <span class="metric-label">DPR</span>
+          <span class="metric-val" id="metric-dpr">--</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Unsupported Page Warning (hidden by default) -->
+    <div class="unsupported-banner" id="unsupported-banner" style="display: none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div>
+        <strong>PROTECTED SYSTEM BUFFER</strong>
+        <p>Extensions cannot capture browser settings or internal store pages.</p>
+      </div>
+    </div>
+
+    <!-- Active Capture Progress (hidden by default) -->
+    <div class="progress-panel" id="progress-panel" style="display: none;">
+      <div class="progress-header">
+        <span class="progress-title" id="progress-status">ADVANCING FILM ROLL...</span>
+        <span class="progress-pct" id="progress-percent">0%</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar" id="progress-fill"></div>
+      </div>
+    </div>
+
+    <!-- Action Trigger Controls -->
+    <div class="action-grid" id="action-controls">
+      <!-- Full Page Exposure -->
+      <button class="action-btn primary" id="btn-capture-full" title="Capture entire scrollable page (Alt+Shift+F)">
+        <div class="btn-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="2" width="14" height="20" rx="2"/>
+            <line x1="5" y1="8" x2="19" y2="8"/>
+            <line x1="5" y1="16" x2="19" y2="16"/>
+            <polyline points="9 11 12 14 15 11"/>
+          </svg>
+        </div>
+        <div class="btn-text">
+          <span class="btn-headline">FULL PAGE EXPOSURE</span>
+          <span class="btn-meta">Continuous vertical scroll stitch</span>
+        </div>
+        <span class="btn-badge" id="badge-frames">AUTO</span>
+      </button>
+
+      <!-- Viewport & Region Sub-grid -->
+      <div class="action-subgrid">
+        <button class="action-btn secondary" id="btn-capture-viewport" title="Capture current visible frame (Alt+Shift+V)">
+          <div class="btn-icon-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </div>
+          <span>VISIBLE VIEWPORT</span>
+        </button>
+
+        <button class="action-btn secondary" id="btn-capture-region" title="Drag to crop custom region (Alt+Shift+A)">
+          <div class="btn-icon-sm">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+            </svg>
+          </div>
+          <span>SELECTED REGION</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Quick Mechanical Controls Footer -->
+    <footer class="sprocket-footer">
+      <div class="control-group">
+        <label class="toggle-control" title="Toggle mechanical shutter sound">
+          <input type="checkbox" id="toggle-shutter-sound" checked>
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">SHUTTER AUDIO</span>
+        </label>
+      </div>
+
+      <div class="control-group">
+        <select class="format-select" id="select-format" title="Output image encoding">
+          <option value="png" selected>FORMAT: PNG</option>
+          <option value="jpeg">FORMAT: JPG (92%)</option>
+        </select>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
