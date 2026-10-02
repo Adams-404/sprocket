@@ -24,6 +24,7 @@
     "type": "module"
   },
   "permissions": [
+    "tabs",
     "activeTab",
     "scripting",
     "storage",

@@ -40,7 +40,7 @@ async function cleanOldCaptures() {
  * Checks if a tab URL is allowed for script injection and capture.
  */
 function isSupportedUrl(url) {
-  if (!url) return false;
+  if (!url) return true;
   return !/^(chrome|brave|edge|about|devtools|chrome-extension):/i.test(url) &&
          !url.startsWith('https://chrome.google.com/webstore') &&
          !url.startsWith('https://chromewebstore.google.com');

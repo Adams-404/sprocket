@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   function isSupportedUrl(url) {
-    if (!url) return false;
+    if (!url) return true;
     return !/^(chrome|brave|edge|about|devtools|chrome-extension):/i.test(url) &&
            !url.startsWith('https://chrome.google.com/webstore') &&
            !url.startsWith('https://chromewebstore.google.com');
@@ -68,7 +68,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    if (!tab || !tab.id || !isSupportedUrl(tab.url)) {
+    if (!tab || !tab.id) {
+      handleUnsupportedPage();
+      return;
+    }
+
+    if (tab.url && !isSupportedUrl(tab.url)) {
       handleUnsupportedPage();
       return;
     }
