@@ -129,8 +129,17 @@
     hud.innerHTML = `
       <span style="color:#ff6b35;font-weight:600;">${rect.width} × ${rect.height} px</span>
       <span style="color:#6b7280;">|</span>
-      <span>[Enter] Capture &nbsp; [Esc] Cancel</span>
+      <button id="sprocket-hud-commit" style="background:#ff6b35;color:#0e1014;border:none;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:0.05em;">CAPTURE</button>
+      <span style="color:#9ca3af;font-size:10px;">or Enter</span>
     `;
+    const commitBtn = hud.querySelector('#sprocket-hud-commit');
+    if (commitBtn) {
+      commitBtn.onmousedown = (e) => e.stopPropagation();
+      commitBtn.onclick = (e) => {
+        e.stopPropagation();
+        commitSelection();
+      };
+    }
   }
 
   function cleanup() {

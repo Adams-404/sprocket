@@ -37,39 +37,62 @@ async function cleanOldCaptures() {
 }
 
 /**
- * Checks if a tab URL is allowed for script injection and capture.
- */
-function isSupportedUrl(url) {
-  if (!url) return true;
-  return !/^(chrome|brave|edge|about|devtools|chrome-extension):/i.test(url) &&
-         !url.startsWith('https://chrome.google.com/webstore') &&
-         !url.startsWith('https://chromewebstore.google.com');
-}
-
-/**
- * Ensures content script is injected into the target tab.
+ * Ensures content script is injected into the target tab, returning telemetry.
+ * Falls back gracefully to tab metrics if page blocks script injection.
  */
 async function ensureContentScript(tabId) {
   try {
-    // Ping content script to see if already present
     const response = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_GET_TELEMETRY' });
-    if (response && response.success) {
+    if (response && response.success && response.telemetry) {
       return response.telemetry;
     }
   } catch {
-    // Not injected yet, inject now
+    // Needs injection
   }
 
-  await chrome.scripting.executeScript({
-    target: { tabId },
-    files: ['src/content/content.js']
-  });
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['src/content/content.js']
+    });
 
-  const response = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_GET_TELEMETRY' });
-  if (!response || !response.telemetry) {
-    throw new Error('Failed to retrieve page measurements from content script.');
+    const response = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_GET_TELEMETRY' });
+    if (response && response.success && response.telemetry) {
+      return response.telemetry;
+    }
+  } catch (err) {
+    console.debug('Sprocket: Script injection skipped or non-responsive:', err);
   }
-  return response.telemetry;
+
+  // Resilient fallback telemetry
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const w = tab.width || 1280;
+    const h = tab.height || 800;
+    return {
+      title: tab.title || 'Active Page',
+      url: tab.url || '',
+      totalWidth: w,
+      totalHeight: h,
+      viewportWidth: w,
+      viewportHeight: h,
+      dpr: 1,
+      scrollX: 0,
+      scrollY: 0
+    };
+  } catch {
+    return {
+      title: 'Active Page',
+      url: '',
+      totalWidth: 1280,
+      totalHeight: 800,
+      viewportWidth: 1280,
+      viewportHeight: 800,
+      dpr: 1,
+      scrollX: 0,
+      scrollY: 0
+    };
+  }
 }
 
 // Minimum interval between captureVisibleTab calls to strictly respect Chromium's
@@ -85,7 +108,6 @@ let activeCaptureSession = null;
  */
 async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxRetries = 4) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    // 1. Enforce minimum spacing between calls
     const now = Date.now();
     const elapsed = now - lastCaptureTimestamp;
     if (elapsed < MIN_CAPTURE_INTERVAL_MS) {
@@ -103,7 +125,6 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
                       msg.includes('MAX_CAPTURE');
 
       if (isQuota && attempt < maxRetries) {
-        // Chromium token bucket refills at 1000ms. Back off 1500ms+ so bucket fully recharges.
         const backoffMs = 1500 + attempt * 500;
         console.warn(`Sprocket: Quota limit touched. Recharging token bucket for ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
@@ -111,7 +132,6 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
         continue;
       }
 
-      // If not a quota error or out of retries, rethrow
       throw err;
     }
   }
@@ -121,19 +141,16 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
  * Captures the entire scrollable page through sequential frame advancement.
  */
 async function captureFullPage(tab) {
-  if (!isSupportedUrl(tab.url)) {
-    throw new Error('Cannot capture browser internal pages or protected URLs.');
-  }
-
   // Ensure target tab and its window are active and focused
   try {
     await chrome.tabs.update(tab.id, { active: true });
     await chrome.windows.update(tab.windowId, { focused: true });
+    await new Promise((r) => setTimeout(r, 150));
   } catch (e) {
     console.debug('Failed to focus tab/window:', e);
   }
 
-  // 1. Get telemetry
+  // 1. Get telemetry (with seamless fallback)
   const telemetry = await ensureContentScript(tab.id);
 
   // 2. Calculate frame slices
@@ -149,7 +166,11 @@ async function captureFullPage(tab) {
   activeCaptureSession = { id: captureId, stopRequested: false };
 
   // 3. Prepare target page (hide scrollbars, catalog sticky elements)
-  await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_PREPARE' });
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_PREPARE' });
+  } catch (e) {
+    console.debug('SPROCKET_PREPARE skipped:', e);
+  }
 
   const capturedFrames = [];
 
@@ -184,13 +205,27 @@ async function captureFullPage(tab) {
       }).catch(() => {});
 
       // Scroll viewport into position
-      await chrome.tabs.sendMessage(tab.id, {
-        action: 'SPROCKET_SCROLL_TO',
-        scrollY: slice.scrollY,
-        isFirstSlice: isFirst,
-        currentFrame: i + 1,
-        totalFrames: slices.length
-      });
+      try {
+        await chrome.tabs.sendMessage(tab.id, {
+          action: 'SPROCKET_SCROLL_TO',
+          scrollY: slice.scrollY,
+          isFirstSlice: isFirst,
+          currentFrame: i + 1,
+          totalFrames: slices.length
+        });
+      } catch (e) {
+        // Fallback: direct window.scrollTo via scripting
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (y) => window.scrollTo(0, y),
+            args: [slice.scrollY]
+          });
+          await new Promise((r) => setTimeout(r, 150));
+        } catch (err2) {
+          console.debug('Direct scroll script skipped:', err2);
+        }
+      }
 
       // Capture frame safely respecting Chromium rate limit
       const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
@@ -213,7 +248,7 @@ async function captureFullPage(tab) {
     try {
       await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_RESTORE' });
     } catch (e) {
-      console.debug('Failed to restore page', e);
+      console.debug('Failed to restore page:', e);
     }
   }
 
@@ -246,17 +281,13 @@ async function captureFullPage(tab) {
  * Captures the currently visible viewport.
  */
 async function captureVisibleViewport(tab) {
-  if (!isSupportedUrl(tab.url)) {
-    throw new Error('Cannot capture browser internal pages or protected URLs.');
-  }
-
   let telemetry = null;
   try {
     telemetry = await ensureContentScript(tab.id);
   } catch {
     telemetry = {
       title: tab.title || 'Untitled',
-      url: tab.url,
+      url: tab.url || '',
       viewportWidth: tab.width || 1280,
       viewportHeight: tab.height || 800,
       totalWidth: tab.width || 1280,
@@ -268,6 +299,7 @@ async function captureVisibleViewport(tab) {
   try {
     await chrome.tabs.update(tab.id, { active: true });
     await chrome.windows.update(tab.windowId, { focused: true });
+    await new Promise((r) => setTimeout(r, 100));
   } catch (e) {
     console.debug('Failed to focus tab/window:', e);
   }
@@ -292,9 +324,10 @@ async function captureVisibleViewport(tab) {
  * Injects the region selector tool onto the current page.
  */
 async function startRegionSelector(tab) {
-  if (!isSupportedUrl(tab.url)) {
-    throw new Error('Cannot capture browser internal pages or protected URLs.');
-  }
+  try {
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+  } catch (e) {}
 
   await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -340,7 +373,6 @@ async function openViewer(captureId) {
 
 // Global Hotkey / Command Listener
 chrome.commands.onCommand.addListener(async (command) => {
-  // Use lastFocusedWindow: true because service workers are headless
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab || !tab.id) return;
 
@@ -357,31 +389,42 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
+// Helper to safely get the target tab across popup and background contexts
+async function resolveTargetTab(targetTabId, windowId) {
+  if (targetTabId) {
+    try {
+      const tab = await chrome.tabs.get(targetTabId);
+      if (tab && tab.id) return tab;
+    } catch {}
+  }
+  if (windowId) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, windowId });
+      if (tab && tab.id) return tab;
+    } catch {}
+  }
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (tab && tab.id) return tab;
+  } catch {}
+  try {
+    const all = await chrome.tabs.query({ active: true });
+    if (all && all.length > 0) return all[0];
+  } catch {}
+  return null;
+}
+
 // Runtime message listener
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.action) return false;
 
   (async () => {
     try {
-      // Helper to safely get the target tab
-      async function resolveTargetTab() {
-        if (message.tabId) {
-          try {
-            return await chrome.tabs.get(message.tabId);
-          } catch {
-            // fall back
-          }
-        }
-        if (sender.tab) return sender.tab;
-        const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-        return active;
-      }
-
       switch (message.action) {
         case 'SPROCKET_GET_TAB_TELEMETRY': {
-          const targetTab = await resolveTargetTab();
-          if (!targetTab || !isSupportedUrl(targetTab.url)) {
-            sendResponse({ success: false, reason: 'unsupported' });
+          const targetTab = await resolveTargetTab(message.tabId, message.windowId);
+          if (!targetTab) {
+            sendResponse({ success: false, error: 'Target tab not found' });
             return;
           }
           const telemetry = await ensureContentScript(targetTab.id);
@@ -390,7 +433,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_START_FULL_CAPTURE': {
-          const tab = await resolveTargetTab();
+          const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await captureFullPage(tab);
           sendResponse(result);
@@ -407,7 +450,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_START_VISIBLE_CAPTURE': {
-          const tab = await resolveTargetTab();
+          const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await captureVisibleViewport(tab);
           sendResponse(result);
@@ -415,7 +458,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_START_REGION_CAPTURE': {
-          const tab = await resolveTargetTab();
+          const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
           const result = await startRegionSelector(tab);
           sendResponse(result);
@@ -423,7 +466,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_REGION_SELECTED': {
-          const tab = sender.tab || (await resolveTargetTab());
+          const tab = sender.tab || (await resolveTargetTab(message.tabId, message.windowId));
           await handleRegionSelected(tab, message.rect, message.title, message.url);
           sendResponse({ success: true });
           break;
@@ -441,9 +484,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         case 'SPROCKET_GET_ACTIVE_TELEMETRY': {
-          const tab = await resolveTargetTab();
-          if (!tab || !isSupportedUrl(tab.url)) {
-            sendResponse({ success: false, reason: 'unsupported' });
+          const tab = await resolveTargetTab(message.tabId, message.windowId);
+          if (!tab) {
+            sendResponse({ success: false, error: 'Tab not found' });
             return;
           }
           const telemetry = await ensureContentScript(tab.id);

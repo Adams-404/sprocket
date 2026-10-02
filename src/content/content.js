@@ -5,9 +5,12 @@
  */
 
 (() => {
-  // Prevent duplicate listener bindings if injected multiple times
-  if (window.__SPROCKET_CONTENT_SCRIPT_LOADED__) return;
-  window.__SPROCKET_CONTENT_SCRIPT_LOADED__ = true;
+  // Clean up any stale message listener if re-injected after extension reload
+  if (window.__SPROCKET_MESSAGE_LISTENER__) {
+    try {
+      chrome.runtime.onMessage.removeListener(window.__SPROCKET_MESSAGE_LISTENER__);
+    } catch {}
+  }
 
   let originalScroll = { x: 0, y: 0 };
   let originalOverflow = null;
@@ -231,7 +234,7 @@
   }
 
   // Communication interface with extension service worker and popup
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  window.__SPROCKET_MESSAGE_LISTENER__ = (message, sender, sendResponse) => {
     if (!message || !message.action) return false;
 
     if (message.action === 'SPROCKET_GET_TELEMETRY') {
@@ -260,5 +263,7 @@
     }
 
     return false;
-  });
+  };
+
+  chrome.runtime.onMessage.addListener(window.__SPROCKET_MESSAGE_LISTENER__);
 })();
