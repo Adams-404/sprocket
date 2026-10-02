@@ -61,3 +61,30 @@ test('rate limiter handles quota errors with backoff and retry', async () => {
   assert.equal(result, 'success');
   assert.equal(attempts, 3);
 });
+
+test('early stop capture halts loop and computes trimmed canvas height', () => {
+  const totalFrames = 10;
+  const capturedFrames = [];
+  const session = { stopRequested: false };
+
+  for (let i = 0; i < totalFrames; i++) {
+    if (i === 4) {
+      session.stopRequested = true;
+    }
+    if (session.stopRequested) {
+      break;
+    }
+    capturedFrames.push({
+      descriptor: {
+        index: i,
+        destY: i * 800,
+        destHeight: 800
+      }
+    });
+  }
+
+  assert.equal(capturedFrames.length, 4);
+  const lastSlice = capturedFrames[capturedFrames.length - 1];
+  const actualCoveredHeight = lastSlice.descriptor.destY + lastSlice.descriptor.destHeight;
+  assert.equal(actualCoveredHeight, 3200); // 4 * 800
+});

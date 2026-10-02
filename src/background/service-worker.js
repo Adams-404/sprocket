@@ -73,10 +73,11 @@ async function ensureContentScript(tabId) {
 }
 
 // Minimum interval between captureVisibleTab calls to strictly respect Chromium's
-// MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota (which is 2 calls/sec).
-// 650ms guarantees <= 1.54 calls/sec, with plenty of margin.
-const MIN_CAPTURE_INTERVAL_MS = 650;
+// MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.
+// Chromium's token bucket allows 1 call per second. 1050ms guarantees strictly < 1 call/sec.
+const MIN_CAPTURE_INTERVAL_MS = 1050;
 let lastCaptureTimestamp = 0;
+let activeCaptureSession = null;
 
 /**
  * Throttled and fault-tolerant captureVisibleTab wrapper.
@@ -102,9 +103,9 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
                       msg.includes('MAX_CAPTURE');
 
       if (isQuota && attempt < maxRetries) {
-        // Progressive backoff: 800ms, 1200ms, 1600ms, 2000ms
-        const backoffMs = 800 + attempt * 400;
-        console.warn(`Sprocket: Capture quota reached. Backing off ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
+        // Chromium token bucket refills at 1000ms. Back off 1500ms+ so bucket fully recharges.
+        const backoffMs = 1500 + attempt * 500;
+        console.warn(`Sprocket: Quota limit touched. Recharging token bucket for ${backoffMs}ms before retry ${attempt + 1}/${maxRetries}...`);
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         lastCaptureTimestamp = Date.now();
         continue;
@@ -136,6 +137,9 @@ async function captureFullPage(tab) {
     dpr: telemetry.dpr
   });
 
+  const captureId = `sprocket_capture_${Date.now()}`;
+  activeCaptureSession = { id: captureId, stopRequested: false };
+
   // 3. Prepare target page (hide scrollbars, catalog sticky elements)
   await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_PREPARE' });
 
@@ -143,10 +147,16 @@ async function captureFullPage(tab) {
 
   try {
     for (let i = 0; i < slices.length; i++) {
+      // Check if user clicked STOP button
+      if (activeCaptureSession && activeCaptureSession.stopRequested) {
+        console.log(`Sprocket: Capture halted early at frame ${i}/${slices.length} by user request.`);
+        break;
+      }
+
       const slice = slices[i];
       const isFirst = i === 0;
 
-      // Broadcast progress update to popup
+      // Broadcast progress update to popup and HUD
       chrome.runtime.sendMessage({
         action: 'SPROCKET_PROGRESS_UPDATE',
         currentFrame: i + 1,
@@ -174,11 +184,12 @@ async function captureFullPage(tab) {
     // Broadcast 100% progress
     chrome.runtime.sendMessage({
       action: 'SPROCKET_PROGRESS_UPDATE',
-      currentFrame: slices.length,
+      currentFrame: capturedFrames.length,
       totalFrames: slices.length,
       percent: 100
     }).catch(() => {});
   } finally {
+    activeCaptureSession = null;
     // 4. Always restore page state
     try {
       await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_RESTORE' });
@@ -187,8 +198,16 @@ async function captureFullPage(tab) {
     }
   }
 
+  if (capturedFrames.length === 0) {
+    throw new Error('Capture stopped before any frames were taken.');
+  }
+
+  // Adjust telemetry to actual captured height if stopped early
+  const lastSlice = capturedFrames[capturedFrames.length - 1];
+  const actualCoveredHeight = (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight) / (telemetry.dpr || 1);
+  telemetry.totalHeight = actualCoveredHeight;
+
   // 5. Store capture job
-  const captureId = `sprocket_capture_${Date.now()}`;
   const payload = {
     id: captureId,
     mode: 'full',
@@ -324,6 +343,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const tab = message.tabId ? await chrome.tabs.get(message.tabId) : activeTab;
           const result = await captureFullPage(tab);
           sendResponse(result);
+          break;
+        }
+
+        case 'SPROCKET_STOP_CAPTURE': {
+          if (activeCaptureSession) {
+            activeCaptureSession.stopRequested = true;
+            console.log('Sprocket: User requested capture stop.');
+          }
+          sendResponse({ success: true });
           break;
         }
 

@@ -130,7 +130,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Calculate total canvas width and height
     const canvasWidth = Math.round(telemetry.totalWidth * dpr);
-    const canvasHeight = Math.round(telemetry.totalHeight * dpr);
+    const lastSlice = slices[slices.length - 1];
+    const canvasHeight = lastSlice
+      ? (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight)
+      : Math.round(telemetry.totalHeight * dpr);
 
     outputCanvas.width = canvasWidth;
     outputCanvas.height = canvasHeight;

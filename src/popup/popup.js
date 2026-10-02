@@ -154,7 +154,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     errorBanner.style.display = 'none';
   }
 
-  btnErrorClose.addEventListener('click', hideError);
+  const btnStopCapture = document.getElementById('btn-stop-capture');
+  if (btnStopCapture) {
+    btnStopCapture.addEventListener('click', async () => {
+      btnStopCapture.disabled = true;
+      progressStatus.textContent = 'FINISHING & STITCHING...';
+      try {
+        await chrome.runtime.sendMessage({ action: 'SPROCKET_STOP_CAPTURE' });
+      } catch (e) {
+        console.debug('Stop message failed', e);
+      }
+    });
+  }
 
   // Listen for real-time progress updates from service worker
   chrome.runtime.onMessage.addListener((message) => {

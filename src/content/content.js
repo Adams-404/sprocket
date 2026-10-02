@@ -182,8 +182,8 @@
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
         display: flex !important;
         align-items: center !important;
-        gap: 10px !important;
-        pointer-events: none !important;
+        gap: 12px !important;
+        pointer-events: auto !important;
         transition: opacity 0.15s ease !important;
       `;
       document.body.appendChild(hudElement);
@@ -194,7 +194,33 @@
       <span style="font-weight:600;color:#ff6b35;">SPROCKET</span>
       <span style="color:#9ca3af;">//</span>
       <span>${text}</span>
+      <button id="sprocket-hud-stop-btn" style="
+        background: #ff6b35 !important;
+        color: #0b0c0f !important;
+        font-family: inherit !important;
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        border: none !important;
+        border-radius: 4px !important;
+        padding: 3px 8px !important;
+        cursor: pointer !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        letter-spacing: 0.05em !important;
+      ">■ STOP &amp; STITCH</button>
     `;
+
+    const stopBtn = hudElement.querySelector('#sprocket-hud-stop-btn');
+    if (stopBtn) {
+      stopBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        stopBtn.disabled = true;
+        stopBtn.textContent = 'FINISHING...';
+        chrome.runtime.sendMessage({ action: 'SPROCKET_STOP_CAPTURE' }).catch(() => {});
+      };
+    }
   }
 
   function removeHud() {

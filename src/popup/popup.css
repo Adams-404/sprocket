@@ -326,6 +326,44 @@ body {
   transition: width 0.15s ease-out;
 }
 
+.stop-btn {
+  margin-top: 6px;
+  background: #231618;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.12s ease;
+}
+
+.stop-btn:hover {
+  background: var(--accent);
+  color: #0d0e12;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.stop-btn:active {
+  transform: translateY(1px);
+}
+
+.stop-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stop-icon {
+  font-size: 9px;
+}
+
 /* --- Action Buttons --- */
 .action-grid {
   display: flex;
