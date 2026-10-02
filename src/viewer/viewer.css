@@ -1,0 +1,436 @@
+/* ==========================================================================
+   SPROCKET — DARKROOM STUDIO VIEWER STYLES
+   Minimalist, high-performance, darkroom craft workstation.
+   ========================================================================== */
+
+:root {
+  --bg-deep: #0b0c0f;
+  --bg-surface: #13151b;
+  --bg-elevated: #1a1d26;
+  --bg-inset: #07080a;
+
+  --border-subtle: #252936;
+  --border-active: #3c4255;
+  --border-focus: #ff6b35;
+
+  --accent: #ff6b35;
+  --accent-glow: rgba(255, 107, 53, 0.25);
+  --accent-light: #ff8559;
+
+  --text-main: #f3f4f6;
+  --text-muted: #9ba1b0;
+  --text-dim: #5a6174;
+
+  --status-ready: #10b981;
+  --status-busy: #ff6b35;
+
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body, html {
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-deep);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.studio-container {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* --- Top Header & Metadata Bar --- */
+.studio-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 16px;
+  z-index: 20;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.studio-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.logo-text {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  color: var(--text-main);
+}
+
+.meta-divider {
+  width: 1px;
+  height: 24px;
+  background-color: var(--border-subtle);
+}
+
+.capture-metadata {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.meta-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta-details {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.meta-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+}
+
+.meta-pill.highlight {
+  color: var(--accent);
+  border-color: rgba(255, 107, 53, 0.4);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.action-btn:hover {
+  background: #252a36;
+  border-color: var(--border-active);
+}
+
+.action-btn:active {
+  transform: translateY(1px);
+}
+
+.action-btn.primary {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent-light);
+  font-weight: 700;
+}
+
+.action-btn.primary:hover {
+  background: var(--accent-light);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+
+.action-btn.secondary {
+  padding: 7px 10px;
+  color: var(--text-muted);
+}
+
+/* --- Studio Body --- */
+.studio-body {
+  display: flex;
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* --- Left Precision Tool Sidebar --- */
+.tool-sidebar {
+  width: 54px;
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 14px;
+  z-index: 10;
+}
+
+.tool-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.tool-section.bottom {
+  margin-top: auto;
+}
+
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.tool-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+
+.tool-btn.active {
+  background: var(--bg-elevated);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* Color & Stroke Pickers */
+.color-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.color-swatch.active {
+  border-color: var(--text-main);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+.stroke-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stroke-btn {
+  width: 32px;
+  height: 22px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.stroke-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* --- Main Canvas Workspace --- */
+.canvas-workspace {
+  flex: 1;
+  position: relative;
+  background-color: var(--bg-deep);
+  /* Technical Drafting Grid Background */
+  background-image: radial-gradient(circle, #21242e 1px, transparent 1px);
+  background-size: 24px 24px;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 40px;
+}
+
+.canvas-stage {
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 0 1px #222632;
+  transition: transform 0.1s ease-out;
+  transform-origin: top center;
+  background: #ffffff;
+}
+
+#output-canvas {
+  display: block;
+  max-width: none;
+}
+
+#draw-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+/* --- Floating Zoom HUD --- */
+.zoom-hud {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-active);
+  border-radius: 6px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+  z-index: 30;
+}
+
+.zoom-btn {
+  width: 26px;
+  height: 26px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-btn:hover {
+  background: #252a36;
+  border-color: var(--border-active);
+}
+
+.zoom-level {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 44px;
+  text-align: center;
+}
+
+.zoom-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-subtle);
+}
+
+.zoom-btn-text {
+  background: transparent;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.zoom-btn-text:hover {
+  background: var(--bg-elevated);
+  color: var(--text-main);
+}
+
+/* --- Feedback Toast --- */
+.studio-toast {
+  position: fixed;
+  top: 70px;
+  right: 24px;
+  background: #14161c;
+  color: var(--text-main);
+  border: 1px solid var(--accent);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 40;
+}
+
+.studio-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sprocket — Studio Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <div class="studio-container">
+    <!-- Top Hardware Navigation & Metadata Bar -->
+    <header class="studio-header">
+      <div class="header-left">
+        <div class="studio-logo">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>
+          </svg>
+          <span class="logo-text">SPROCKET // STUDIO</span>
+        </div>
+        <div class="meta-divider"></div>
+        <div class="capture-metadata">
+          <span class="meta-title" id="meta-title">Rendering capture...</span>
+          <div class="meta-details">
+            <span class="meta-pill" id="meta-dimensions">-- × --</span>
+            <span class="meta-pill" id="meta-size">-- KB</span>
+            <span class="meta-pill highlight" id="meta-mode">FULL PAGE</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Quick Export Action Buttons -->
+        <button class="action-btn" id="btn-copy-clipboard" title="Copy lossless PNG directly to system clipboard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          <span>COPY TO CLIPBOARD</span>
+        </button>
+
+        <button class="action-btn primary" id="btn-download-png" title="Download lossless PNG">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>SAVE PNG</span>
+        </button>
+
+        <button class="action-btn secondary" id="btn-download-jpg" title="Download compressed JPEG">
+          <span>JPG</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Studio Body: Tools Sidebar + Canvas Viewport -->
+    <div class="studio-body">
+      <!-- Precision Tool Palette Sidebar -->
+      <aside class="tool-sidebar">
+        <div class="tool-section">
+          <span class="section-label">MODE</span>
+          <button class="tool-btn active" data-tool="select" id="tool-select" title="Pan / View mode (V)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 3l7 18 2.5-7 7-2.5L5 3z"/>
+            </svg>
+          </button>
+          <button class="tool-btn" data-tool="crop" id="tool-crop" title="Crop canvas (C)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 2v14a2 2 0 0 0 2 2h14"/>
+              <path d="M18 22V8a2 2 0 0 0-2-2H2"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="tool-section">
+          <span class="section-label">MARKUP</span>
+          <button class="tool-btn" data-tool="rect" id="tool-rect" title="Draw rectangle frame (R)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+            </svg>
+          </button>
+          <button class="tool-btn" data-tool="arrow" id="tool-arrow" title="Draw pointer arrow (A)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="19" x2="19" y2="5"/>
+              <polyline points="10 5 19 5 19 14"/>
+            </svg>
+          </button>
+          <button class="tool-btn" data-tool="pen" id="tool-pen" title="Freehand markup pen (P)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 19l7-7 3 3-7 7-3-3z"/>
+              <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
+            </svg>
+          </button>
+          <button class="tool-btn" data-tool="redact" id="tool-redact" title="Redact / Censor sensitive data (X)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="6" width="18" height="12" rx="1" fill="currentColor"/>
+              <line x1="1" y1="1" x2="23" y2="23" stroke="#ff6b35" stroke-width="2"/>
+            </svg>
+          </button>
+          <button class="tool-btn" data-tool="text" id="tool-text" title="Insert callout text (T)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 7 4 4 20 4 20 7"/>
+              <line x1="9" y1="20" x2="15" y2="20"/>
+              <line x1="12" y1="4" x2="12" y2="20"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="tool-section">
+          <span class="section-label">COLOR</span>
+          <div class="color-palette">
+            <button class="color-swatch active" data-color="#ff6b35" style="background:#ff6b35;" title="Safety Orange"></button>
+            <button class="color-swatch" data-color="#f59e0b" style="background:#f59e0b;" title="Amber Warning"></button>
+            <button class="color-swatch" data-color="#ffffff" style="background:#ffffff;" title="Signal White"></button>
+            <button class="color-swatch" data-color="#06b6d4" style="background:#06b6d4;" title="Cyan Calibration"></button>
+            <button class="color-swatch" data-color="#000000" style="background:#000000;" title="Deep Redact"></button>
+          </div>
+        </div>
+
+        <div class="tool-section">
+          <span class="section-label">LINE</span>
+          <div class="stroke-palette">
+            <button class="stroke-btn" data-width="2" title="Fine (2px)">•</button>
+            <button class="stroke-btn active" data-width="4" title="Medium (4px)">••</button>
+            <button class="stroke-btn" data-width="8" title="Heavy (8px)">•••</button>
+          </div>
+        </div>
+
+        <div class="tool-section bottom">
+          <button class="tool-btn" id="btn-undo" title="Undo markup (Ctrl+Z)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 7v6h6"/>
+              <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+            </svg>
+          </button>
+          <button class="tool-btn" id="btn-reset" title="Clear all annotations">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Canvas Workspace -->
+      <main class="canvas-workspace" id="canvas-workspace">
+        <div class="canvas-stage" id="canvas-stage">
+          <!-- Stitched Capture Canvas -->
+          <canvas id="output-canvas"></canvas>
+          <!-- Interactive Annotation Canvas Layer -->
+          <canvas id="draw-canvas"></canvas>
+        </div>
+
+        <!-- Floating Zoom / View Controls HUD -->
+        <div class="zoom-hud">
+          <button class="zoom-btn" id="btn-zoom-out" title="Zoom Out (-)">−</button>
+          <span class="zoom-level" id="zoom-readout">100%</span>
+          <button class="zoom-btn" id="btn-zoom-in" title="Zoom In (+)">+</button>
+          <div class="zoom-divider"></div>
+          <button class="zoom-btn-text" id="btn-zoom-fit">FIT</button>
+          <button class="zoom-btn-text" id="btn-zoom-100">100%</button>
+        </div>
+
+        <!-- Status / Feedback Toast Notification -->
+        <div class="studio-toast" id="studio-toast">
+          <span class="toast-dot"></span>
+          <span class="toast-msg" id="toast-msg">Ready</span>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>
