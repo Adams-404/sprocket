@@ -25,7 +25,7 @@
     const doc = document.documentElement;
     const body = document.body;
 
-    const totalWidth = Math.max(
+    let totalWidth = Math.max(
       body ? body.scrollWidth : 0,
       doc.scrollWidth,
       body ? body.offsetWidth : 0,
@@ -33,7 +33,7 @@
       doc.clientWidth
     );
 
-    const totalHeight = Math.max(
+    let totalHeight = Math.max(
       body ? body.scrollHeight : 0,
       doc.scrollHeight,
       body ? body.offsetHeight : 0,
@@ -41,8 +41,17 @@
       doc.clientHeight
     );
 
-    const viewportWidth = window.innerWidth || doc.clientWidth;
-    const viewportHeight = window.innerHeight || doc.clientHeight;
+    // Also inspect root wrapper elements (e.g. Next.js #__next, React #root, SPA main)
+    const rootContainers = document.querySelectorAll('body > div, body > main, #__next, #root, #app');
+    for (let i = 0; i < rootContainers.length; i++) {
+      const ch = rootContainers[i].scrollHeight;
+      if (ch && ch > totalHeight) {
+        totalHeight = ch;
+      }
+    }
+
+    const viewportWidth = window.innerWidth || doc.clientWidth || 1280;
+    const viewportHeight = window.innerHeight || doc.clientHeight || 800;
     const dpr = window.devicePixelRatio || 1;
 
     return {
@@ -68,21 +77,27 @@
       y: window.scrollY || window.pageYOffset || 0
     };
 
-    // Inject temporary CSS to freeze scrollbars and disable smooth-scrolling animations
+    // Inject temporary CSS to freeze scrollbars and disable smooth-scrolling animations.
+    // NOTE: NEVER set overflow: hidden here, as that locks viewport scrolling in Blink/Chromium!
     if (!styleLockElement) {
       styleLockElement = document.createElement('style');
       styleLockElement.id = 'sprocket-capture-lock';
       styleLockElement.textContent = `
-        html, body {
+        html {
           scroll-behavior: auto !important;
-          overflow: hidden !important;
           scrollbar-width: none !important;
           -ms-overflow-style: none !important;
         }
-        html::-webkit-scrollbar, body::-webkit-scrollbar {
+        body {
+          scroll-behavior: auto !important;
+          scrollbar-width: none !important;
+          -ms-overflow-style: none !important;
+        }
+        html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar {
           display: none !important;
           width: 0 !important;
           height: 0 !important;
+          background: transparent !important;
         }
       `;
       document.head.appendChild(styleLockElement);
@@ -113,8 +128,21 @@
    * Jumps to target scroll coordinates and updates sticky element visibility.
    */
   async function scrollToSlice(scrollY, isFirstSlice, currentFrame, totalFrames) {
-    // Jump viewport directly
-    window.scrollTo(0, scrollY);
+    // 1. Jump viewport directly
+    window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = scrollY;
+    if (document.body) {
+      document.body.scrollTop = scrollY;
+    }
+
+    // 2. Also scroll any root container that might have overflow-y
+    const rootContainers = document.querySelectorAll('body > div, body > main, #__next, #root, #app');
+    for (let i = 0; i < rootContainers.length; i++) {
+      const el = rootContainers[i];
+      if (el.scrollHeight > window.innerHeight && el.scrollTop !== undefined) {
+        el.scrollTop = scrollY;
+      }
+    }
 
     // After frame 0, hide fixed/sticky elements to avoid duplicate headers down the image
     if (!isFirstSlice) {
@@ -133,9 +161,14 @@
     // Yield for DOM repaint & dynamic component rendering
     await new Promise((resolve) => {
       requestAnimationFrame(() => {
-        setTimeout(resolve, 200);
+        setTimeout(resolve, 250);
       });
     });
+
+    return {
+      success: true,
+      actualScrollY: window.scrollY || document.documentElement.scrollTop || 0
+    };
   }
 
   /**
@@ -232,6 +265,12 @@
       hudElement = null;
     }
   }
+
+  window.__SPROCKET_UPDATE_HUD__ = (currentFrame, totalFrames) => {
+    const pct = Math.round((currentFrame / totalFrames) * 100);
+    showHud(`FRAME [${currentFrame}/${totalFrames}] — ${pct}%`, pct);
+  };
+  window.__SPROCKET_REMOVE_HUD__ = removeHud;
 
   // Communication interface with extension service worker and popup
   window.__SPROCKET_MESSAGE_LISTENER__ = (message, sender, sendResponse) => {

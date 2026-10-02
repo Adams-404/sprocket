@@ -37,34 +37,90 @@ async function cleanOldCaptures() {
 }
 
 /**
- * Ensures content script is injected into the target tab, returning telemetry.
- * Falls back gracefully to tab metrics if page blocks script injection.
+ * Ensures content script is injected and returns accurate DOM telemetry.
+ * Uses direct page DOM execution to measure full document height even on complex SPAs.
  */
 async function ensureContentScript(tabId) {
+  // 1. Direct DOM inspection via executeScript to ensure full-document height is detected on modern SPAs
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_GET_TELEMETRY' });
-    if (response && response.success && response.telemetry) {
-      return response.telemetry;
-    }
-  } catch {
-    // Needs injection
-  }
-
-  try {
-    await chrome.scripting.executeScript({
+    const [execResult] = await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['src/content/content.js']
+      func: () => {
+        const doc = document.documentElement;
+        const body = document.body;
+
+        // Reset restrictive body overflow that can block window.scrollTo
+        if (body && (body.style.overflowY === 'hidden' || body.style.overflowY === 'scroll')) {
+          body.style.overflowY = 'visible';
+        }
+
+        const widths = [
+          doc.clientWidth,
+          doc.scrollWidth,
+          doc.offsetWidth,
+          body ? body.scrollWidth : 0,
+          body ? body.offsetWidth : 0,
+          window.innerWidth
+        ].filter(Boolean);
+
+        const heights = [
+          doc.clientHeight,
+          doc.scrollHeight,
+          doc.offsetHeight,
+          body ? body.scrollHeight : 0,
+          body ? body.offsetHeight : 0,
+          window.innerHeight
+        ].filter(Boolean);
+
+        // Also inspect direct children of body in case page uses full-height wrapper
+        const children = document.querySelectorAll('body > *');
+        for (let i = 0; i < children.length; i++) {
+          const el = children[i];
+          if (el.scrollHeight) heights.push(el.scrollHeight);
+          if (el.offsetHeight) heights.push(el.offsetHeight);
+        }
+
+        const totalWidth = Math.max(...widths);
+        const totalHeight = Math.max(...heights);
+        const viewportWidth = window.innerWidth || doc.clientWidth || 1280;
+        const viewportHeight = window.innerHeight || doc.clientHeight || 800;
+
+        return {
+          title: document.title || 'Untitled',
+          url: window.location.href,
+          totalWidth,
+          totalHeight,
+          viewportWidth,
+          viewportHeight,
+          dpr: window.devicePixelRatio || 1,
+          scrollX: window.scrollX || 0,
+          scrollY: window.scrollY || 0
+        };
+      }
     });
 
+    if (execResult && execResult.result && execResult.result.totalHeight > 0) {
+      // Also inject content.js for sticky headers and HUD
+      chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['src/content/content.js']
+      }).catch(() => {});
+
+      return execResult.result;
+    }
+  } catch (err) {
+    console.debug('Sprocket: Script execution measurement failed:', err);
+  }
+
+  // 2. Message query fallback
+  try {
     const response = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_GET_TELEMETRY' });
     if (response && response.success && response.telemetry) {
       return response.telemetry;
     }
-  } catch (err) {
-    console.debug('Sprocket: Script injection skipped or non-responsive:', err);
-  }
+  } catch {}
 
-  // Resilient fallback telemetry
+  // 3. Tab fallback
   try {
     const tab = await chrome.tabs.get(tabId);
     const w = tab.width || 1280;
@@ -150,7 +206,7 @@ async function captureFullPage(tab) {
     console.debug('Failed to focus tab/window:', e);
   }
 
-  // 1. Get telemetry (with seamless fallback)
+  // 1. Get telemetry (using direct DOM measurement)
   const telemetry = await ensureContentScript(tab.id);
 
   // 2. Calculate frame slices
@@ -204,7 +260,7 @@ async function captureFullPage(tab) {
         percent: Math.round(((i) / slices.length) * 100)
       }).catch(() => {});
 
-      // Scroll viewport into position
+      // Scroll viewport into position using both content script and direct scripting
       try {
         await chrome.tabs.sendMessage(tab.id, {
           action: 'SPROCKET_SCROLL_TO',
@@ -218,10 +274,21 @@ async function captureFullPage(tab) {
         try {
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: (y) => window.scrollTo(0, y),
-            args: [slice.scrollY]
+            func: (targetY, isFirstSlice, currentFrame, totalFrames) => {
+              window.scrollTo({ top: targetY, left: 0, behavior: 'instant' });
+              if (document.scrollingElement) document.scrollingElement.scrollTop = targetY;
+              if (document.documentElement) document.documentElement.scrollTop = targetY;
+              if (document.body) document.body.scrollTop = targetY;
+              const containers = document.querySelectorAll('body > div, body > main, #__next, #root, #app');
+              for (let c of containers) {
+                if (c.scrollHeight > window.innerHeight && c.scrollTop !== undefined) c.scrollTop = targetY;
+              }
+              if (typeof window.__SPROCKET_UPDATE_HUD__ === 'function') {
+                window.__SPROCKET_UPDATE_HUD__(currentFrame, totalFrames);
+              }
+            },
+            args: [slice.scrollY, isFirst, i + 1, slices.length]
           });
-          await new Promise((r) => setTimeout(r, 150));
         } catch (err2) {
           console.debug('Direct scroll script skipped:', err2);
         }

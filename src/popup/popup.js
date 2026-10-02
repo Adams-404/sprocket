@@ -229,23 +229,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     playShutterSound({ enabled: soundEnabled });
     setBusyState('STITCHING FRAMES...');
 
-    try {
-      const res = await chrome.runtime.sendMessage({
-        action: 'SPROCKET_START_FULL_CAPTURE',
-        tabId: tab.id,
-        windowId: tab.windowId
-      });
+    // Trigger full-page capture in background service worker
+    chrome.runtime.sendMessage({
+      action: 'SPROCKET_START_FULL_CAPTURE',
+      tabId: tab.id,
+      windowId: tab.windowId
+    }).catch((err) => {
+      console.debug('Capture error:', err);
+    });
 
-      if (res && res.success) {
-        progressFill.style.width = '100%';
-        progressPercent.textContent = '100%';
-        setTimeout(() => window.close(), 300);
-      } else {
-        showError(res?.error || 'Full-page capture encountered an issue.');
-      }
-    } catch (err) {
-      showError(err.message || String(err), 'CAPTURE FAILED');
-    }
+    // Close the popup after audio triggers so user directly sees the page scroll & in-page HUD
+    setTimeout(() => {
+      window.close();
+    }, 200);
   });
 
   // Visible Viewport Capture
