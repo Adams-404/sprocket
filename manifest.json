@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "Sprocket — Precision Full-Page Screenshot",
+  "version": "1.0.0",
+  "description": "Tactile, mechanical-precision full-page and viewport screenshot tool for Brave and Chrome.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "default_title": "Sprocket Screenshot"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "downloads",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Open Sprocket screenshot menu"
+    },
+    "capture-full-page": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Command+Shift+F"
+      },
+      "description": "Capture full page screenshot"
+    },
+    "capture-visible": {
+      "suggested_key": {
+        "default": "Alt+Shift+V",
+        "mac": "Command+Shift+V"
+      },
+      "description": "Capture visible viewport"
+    },
+    "capture-selected": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Command+Shift+A"
+      },
+      "description": "Capture selected region"
+    }
+  }
+}
