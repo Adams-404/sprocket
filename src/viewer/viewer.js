@@ -71,22 +71,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     return;
   }
 
-  // 2. Fetch Capture Record from Background Memory or Storage
-  try {
-    const res = await chrome.runtime.sendMessage({
-      action: 'SPROCKET_GET_CAPTURE_DATA',
-      captureId
-    });
-    if (res && res.success && res.capture) {
-      currentCapture = res.capture;
+  // 2. Fetch Capture Record from Background Memory or Storage with retry
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const res = await chrome.runtime.sendMessage({
+        action: 'SPROCKET_GET_CAPTURE_DATA',
+        captureId
+      });
+      if (res && res.success && res.capture) {
+        currentCapture = res.capture;
+        break;
+      }
+    } catch (e) {
+      console.debug('Background memory query attempt', attempt, e);
     }
-  } catch (e) {
-    console.debug('Background memory query:', e);
-  }
 
-  if (!currentCapture) {
-    const record = await chrome.storage.local.get(captureId);
-    currentCapture = record && record[captureId];
+    if (!currentCapture) {
+      try {
+        const record = await chrome.storage.local.get(captureId);
+        if (record && record[captureId]) {
+          currentCapture = record[captureId];
+          break;
+        }
+      } catch {}
+    }
+
+    if (!currentCapture) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
   }
 
   if (!currentCapture) {

@@ -103,7 +103,15 @@ async function ensureContentScript(tabId) {
     });
 
     if (execResult && execResult.result && execResult.result.totalHeight > 0) {
-      // Also inject content.js for scrollbar suppression and sticky headers
+      // Check if content script is already active before re-injecting
+      try {
+        const ping = await chrome.tabs.sendMessage(tabId, { action: 'SPROCKET_PING' });
+        if (ping && ping.success) {
+          return execResult.result;
+        }
+      } catch {}
+
+      // Inject content.js if not already present
       chrome.scripting.executeScript({
         target: { tabId },
         files: ['src/content/content.js']
@@ -364,6 +372,8 @@ async function captureFullPage(tab, options = {}) {
       totalFrames: slices.length,
       percent: 100
     }).catch(() => {});
+  } catch (loopErr) {
+    console.warn('Sprocket: Capture loop encountered an issue:', loopErr);
   } finally {
     try {
       await chrome.action.setBadgeText({ text: '' });
@@ -386,7 +396,7 @@ async function captureFullPage(tab, options = {}) {
   const actualCoveredHeight = (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight) / (telemetry.dpr || 1);
   telemetry.totalHeight = actualCoveredHeight;
 
-  // 5. Store capture job in memory AND local storage
+  // 5. Store capture job in memory
   const payload = {
     id: captureId,
     mode: 'full',
@@ -399,18 +409,25 @@ async function captureFullPage(tab, options = {}) {
 
   memoryCaptures.set(captureId, payload);
 
+  // 6. IMMEDIATELY Open Studio Viewer (zero delay, never blocked by storage)
   try {
-    await chrome.storage.local.set({ [captureId]: payload });
-  } catch (storageErr) {
-    console.warn('Sprocket: Local storage write failed (falling back to memory cache):', storageErr);
-  }
-
-  // 6. ALWAYS Open Studio Viewer
-  try {
-    await openViewer(captureId);
+    await openViewer(captureId, tab.windowId);
   } catch (viewerErr) {
     console.error('Sprocket: Failed to open viewer tab:', viewerErr);
+    try {
+      await chrome.tabs.create({
+        url: chrome.runtime.getURL(`src/viewer/viewer.html?id=${encodeURIComponent(captureId)}`),
+        active: true
+      });
+    } catch (fallbackErr) {
+      console.error('Sprocket: Fallback viewer open failed:', fallbackErr);
+    }
   }
+
+  // 7. Non-blocking local storage backup in background
+  chrome.storage.local.set({ [captureId]: payload }).catch((storageErr) => {
+    console.warn('Sprocket: Local storage write failed (falling back to memory cache):', storageErr);
+  });
 
   return { success: true, captureId };
 }
@@ -471,12 +488,15 @@ async function captureVisibleViewport(tab, options = {}) {
   memoryCaptures.set(captureId, payload);
 
   try {
-    await chrome.storage.local.set({ [captureId]: payload });
-  } catch (storageErr) {
-    console.warn('Sprocket: Viewport storage write issue:', storageErr);
+    await openViewer(captureId, tab.windowId);
+  } catch (viewerErr) {
+    console.error('Sprocket: Failed to open viewer tab:', viewerErr);
   }
 
-  await openViewer(captureId);
+  chrome.storage.local.set({ [captureId]: payload }).catch((storageErr) => {
+    console.warn('Sprocket: Viewport storage write issue:', storageErr);
+  });
+
   return { success: true, captureId };
 }
 
@@ -534,19 +554,32 @@ async function handleRegionSelected(tab, rect, title, url, options = {}) {
   memoryCaptures.set(captureId, payload);
 
   try {
-    await chrome.storage.local.set({ [captureId]: payload });
-  } catch (storageErr) {
-    console.warn('Sprocket: Region storage write issue:', storageErr);
+    await openViewer(captureId, tab.windowId);
+  } catch (viewerErr) {
+    console.error('Sprocket: Failed to open viewer tab:', viewerErr);
   }
 
-  await openViewer(captureId);
+  chrome.storage.local.set({ [captureId]: payload }).catch((storageErr) => {
+    console.warn('Sprocket: Region storage write issue:', storageErr);
+  });
 }
 
 /**
  * Opens the Sprocket Studio viewer in a new tab.
  */
-async function openViewer(captureId) {
+async function openViewer(captureId, windowId) {
   const viewerUrl = chrome.runtime.getURL(`src/viewer/viewer.html?id=${encodeURIComponent(captureId)}`);
+  if (windowId) {
+    try {
+      const tab = await chrome.tabs.create({ windowId, url: viewerUrl, active: true });
+      try {
+        await chrome.windows.update(windowId, { focused: true });
+      } catch {}
+      return tab;
+    } catch (e) {
+      console.debug('openViewer windowId attempt failed, falling back:', e);
+    }
+  }
   return await chrome.tabs.create({ url: viewerUrl, active: true });
 }
 

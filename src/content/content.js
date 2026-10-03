@@ -231,6 +231,11 @@
   window.__SPROCKET_MESSAGE_LISTENER__ = (message, sender, sendResponse) => {
     if (!message || !message.action) return false;
 
+    if (message.action === 'SPROCKET_PING') {
+      sendResponse({ success: true });
+      return false;
+    }
+
     if (message.action === 'SPROCKET_GET_TELEMETRY') {
       sendResponse({ success: true, telemetry: getDocumentTelemetry() });
       return false;
