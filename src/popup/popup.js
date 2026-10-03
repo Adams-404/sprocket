@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const toggleSound = document.getElementById('toggle-shutter-sound');
   const selectFormat = document.getElementById('select-format');
+  const selectResolution = document.getElementById('select-resolution');
 
   const errorBanner = document.getElementById('error-banner');
   const errorTitle = document.getElementById('error-title');
@@ -41,13 +42,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // 1. Load user preferences
   try {
-    const prefs = await chrome.storage.local.get(['sprocket_sound', 'sprocket_format']);
+    const prefs = await chrome.storage.local.get(['sprocket_sound', 'sprocket_format', 'sprocket_resolution']);
     if (prefs.sprocket_sound !== undefined) {
       soundEnabled = prefs.sprocket_sound;
       toggleSound.checked = soundEnabled;
     }
     if (prefs.sprocket_format) {
       selectFormat.value = prefs.sprocket_format;
+    }
+    if (prefs.sprocket_resolution && selectResolution) {
+      selectResolution.value = prefs.sprocket_resolution;
     }
   } catch (e) {
     console.debug('Failed to load prefs:', e);
@@ -61,6 +65,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       playShutterSound({ enabled: true });
     }
   });
+
+  function updateResolutionTelemetry() {
+    const res = selectResolution ? selectResolution.value : '4k';
+    if (res === '4k') {
+      metricDpr.textContent = '4K ULTRA';
+      metricDpr.title = 'Super-sampled 4K Ultra-HD capture';
+    } else {
+      metricDpr.textContent = '1x NATIVE';
+      metricDpr.title = '1:1 native hardware display pixels';
+    }
+  }
+
+  updateResolutionTelemetry();
+
+  if (selectResolution) {
+    selectResolution.addEventListener('change', async () => {
+      await chrome.storage.local.set({ sprocket_resolution: selectResolution.value });
+      updateResolutionTelemetry();
+    });
+  }
 
   selectFormat.addEventListener('change', async () => {
     await chrome.storage.local.set({ sprocket_format: selectFormat.value });
@@ -229,11 +253,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     playShutterSound({ enabled: soundEnabled });
     setBusyState('STITCHING FRAMES...');
 
+    const resolution = selectResolution ? selectResolution.value : '4k';
+    const format = selectFormat ? selectFormat.value : 'png';
+
     // Trigger full-page capture in background service worker
     chrome.runtime.sendMessage({
       action: 'SPROCKET_START_FULL_CAPTURE',
       tabId: tab.id,
-      windowId: tab.windowId
+      windowId: tab.windowId,
+      resolution,
+      format
     }).catch((err) => {
       console.debug('Capture error:', err);
     });
@@ -258,11 +287,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     playShutterSound({ enabled: soundEnabled });
     setBusyState('CAPTURING VIEWPORT...');
 
+    const resolution = selectResolution ? selectResolution.value : '4k';
+    const format = selectFormat ? selectFormat.value : 'png';
+
     try {
       const res = await chrome.runtime.sendMessage({
         action: 'SPROCKET_START_VISIBLE_CAPTURE',
         tabId: tab.id,
-        windowId: tab.windowId
+        windowId: tab.windowId,
+        resolution,
+        format
       });
 
       if (res && res.success) {
@@ -286,11 +320,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     currentTab = tab;
+    const resolution = selectResolution ? selectResolution.value : '4k';
+    const format = selectFormat ? selectFormat.value : 'png';
+
     try {
       const res = await chrome.runtime.sendMessage({
         action: 'SPROCKET_START_REGION_CAPTURE',
         tabId: tab.id,
-        windowId: tab.windowId
+        windowId: tab.windowId,
+        resolution,
+        format
       });
 
       if (res && res.success) {

@@ -213,7 +213,9 @@ async function safeCaptureVisibleTab(windowId, options = { format: 'png' }, maxR
 /**
  * Captures the entire scrollable page through sequential frame advancement.
  */
-async function captureFullPage(tab) {
+async function captureFullPage(tab, options = {}) {
+  const resolution = options.resolution || '4k';
+  const format = options.format || 'png';
   // Ensure target tab and its window are active and focused
   try {
     await chrome.tabs.update(tab.id, { active: true });
@@ -360,6 +362,8 @@ async function captureFullPage(tab) {
   const payload = {
     id: captureId,
     mode: 'full',
+    resolution,
+    format,
     telemetry,
     slices: capturedFrames,
     createdAt: Date.now()
@@ -386,7 +390,9 @@ async function captureFullPage(tab) {
 /**
  * Captures the currently visible viewport.
  */
-async function captureVisibleViewport(tab) {
+async function captureVisibleViewport(tab, options = {}) {
+  const resolution = options.resolution || '4k';
+  const format = options.format || 'png';
   let telemetry = null;
   try {
     telemetry = await ensureContentScript(tab.id);
@@ -416,6 +422,8 @@ async function captureVisibleViewport(tab) {
   const payload = {
     id: captureId,
     mode: 'viewport',
+    resolution,
+    format,
     telemetry,
     dataUrl,
     createdAt: Date.now()
@@ -433,10 +441,17 @@ async function captureVisibleViewport(tab) {
   return { success: true, captureId };
 }
 
+let pendingRegionOptions = { resolution: '4k', format: 'png' };
+
 /**
  * Injects the region selector tool onto the current page.
  */
-async function startRegionSelector(tab) {
+async function startRegionSelector(tab, options = {}) {
+  pendingRegionOptions = {
+    resolution: options.resolution || '4k',
+    format: options.format || 'png'
+  };
+
   try {
     await chrome.tabs.update(tab.id, { active: true });
     await chrome.windows.update(tab.windowId, { focused: true });
@@ -453,13 +468,18 @@ async function startRegionSelector(tab) {
 /**
  * Handles region selection completion from selector.js.
  */
-async function handleRegionSelected(tab, rect, title, url) {
+async function handleRegionSelected(tab, rect, title, url, options = {}) {
+  const resolution = options.resolution || pendingRegionOptions.resolution || '4k';
+  const format = options.format || pendingRegionOptions.format || 'png';
+
   const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
   const captureId = `sprocket_capture_${Date.now()}`;
 
   const payload = {
     id: captureId,
     mode: 'region',
+    resolution,
+    format,
     telemetry: {
       title: title || tab.title || 'Untitled',
       url: url || tab.url,
@@ -496,13 +516,19 @@ chrome.commands.onCommand.addListener(async (command) => {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab || !tab.id) return;
 
+  const prefs = await chrome.storage.local.get(['sprocket_resolution', 'sprocket_format']);
+  const options = {
+    resolution: prefs.sprocket_resolution || '4k',
+    format: prefs.sprocket_format || 'png'
+  };
+
   try {
     if (command === 'capture-full-page') {
-      await captureFullPage(tab);
+      await captureFullPage(tab, options);
     } else if (command === 'capture-visible') {
-      await captureVisibleViewport(tab);
+      await captureVisibleViewport(tab, options);
     } else if (command === 'capture-selected') {
-      await startRegionSelector(tab);
+      await startRegionSelector(tab, options);
     }
   } catch (err) {
     console.error('Sprocket command error:', err);
@@ -555,7 +581,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'SPROCKET_START_FULL_CAPTURE': {
           const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
-          const result = await captureFullPage(tab);
+          const result = await captureFullPage(tab, {
+            resolution: message.resolution,
+            format: message.format
+          });
           sendResponse(result);
           break;
         }
@@ -572,7 +601,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'SPROCKET_START_VISIBLE_CAPTURE': {
           const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
-          const result = await captureVisibleViewport(tab);
+          const result = await captureVisibleViewport(tab, {
+            resolution: message.resolution,
+            format: message.format
+          });
           sendResponse(result);
           break;
         }
@@ -580,14 +612,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case 'SPROCKET_START_REGION_CAPTURE': {
           const tab = await resolveTargetTab(message.tabId, message.windowId);
           if (!tab) throw new Error('No target tab resolved for capture.');
-          const result = await startRegionSelector(tab);
+          const result = await startRegionSelector(tab, {
+            resolution: message.resolution,
+            format: message.format
+          });
           sendResponse(result);
           break;
         }
 
         case 'SPROCKET_REGION_SELECTED': {
           const tab = sender.tab || (await resolveTargetTab(message.tabId, message.windowId));
-          await handleRegionSelected(tab, message.rect, message.title, message.url);
+          await handleRegionSelected(tab, message.rect, message.title, message.url, pendingRegionOptions);
           sendResponse({ success: true });
           break;
         }

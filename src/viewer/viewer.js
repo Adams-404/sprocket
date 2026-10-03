@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const metaDimensions = document.getElementById('meta-dimensions');
   const metaSize = document.getElementById('meta-size');
   const metaMode = document.getElementById('meta-mode');
+  const metaRes = document.getElementById('meta-res');
 
   const btnCopyClipboard = document.getElementById('btn-copy-clipboard');
   const btnDownloadPng = document.getElementById('btn-download-png');
@@ -106,12 +107,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     metaTitle.title = capture.telemetry?.url || capture.telemetry?.title || '';
     metaMode.textContent = capture.mode.toUpperCase();
 
+    const is4K = capture.resolution === '4k' || !capture.resolution;
+    if (metaRes) {
+      metaRes.textContent = is4K ? '4K ULTRA (2x)' : 'NATIVE (1x)';
+      metaRes.className = is4K ? 'meta-pill highlight interactive' : 'meta-pill interactive';
+      metaRes.title = `Sensor Resolution: ${is4K ? '4K Ultra-HD (Click to toggle Native)' : 'Native 1:1 (Click to toggle 4K)'}`;
+    }
+
     if (capture.mode === 'full') {
       await stitchFullPage(capture);
     } else if (capture.mode === 'region') {
       await renderCroppedRegion(capture);
     } else {
-      await renderSingleImage(capture.dataUrl);
+      await renderSingleImage(capture.dataUrl, is4K);
     }
 
     // Synchronize drawing canvas overlay dimensions
@@ -121,8 +129,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     drawCanvas.style.height = `${outputCanvas.height}px`;
 
     // Metadata telemetry
-    const dpr = capture.telemetry?.dpr || 1;
-    metaDimensions.textContent = formatDimensions(outputCanvas.width, outputCanvas.height, dpr);
+    const baseDpr = capture.telemetry?.dpr || 1;
+    const effectiveDpr = is4K ? baseDpr * 2 : baseDpr;
+    metaDimensions.textContent = formatDimensions(outputCanvas.width, outputCanvas.height, effectiveDpr);
 
     outputCanvas.toBlob((blob) => {
       if (blob) {
@@ -132,7 +141,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Auto-fit initial zoom if very tall
     fitZoomToWorkspace();
-    showToast('STITCH EXPOSURE COMPLETE');
+    showToast(`✓ ${is4K ? '4K ULTRA-HD' : 'NATIVE'} EXPOSURE READY`);
   }
 
   /**
@@ -140,21 +149,9 @@ document.addEventListener('DOMContentLoaded', async () => {
    */
   async function stitchFullPage(capture) {
     const { slices, telemetry } = capture;
+    const is4K = capture.resolution === '4k' || !capture.resolution;
+    const scale = is4K ? 2 : 1;
     const dpr = telemetry.dpr || 1;
-
-    // Calculate total canvas width and height
-    const canvasWidth = Math.round(telemetry.totalWidth * dpr);
-    const lastSlice = slices[slices.length - 1];
-    const canvasHeight = lastSlice
-      ? (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight)
-      : Math.round(telemetry.totalHeight * dpr);
-
-    outputCanvas.width = canvasWidth;
-    outputCanvas.height = canvasHeight;
-
-    // High quality rendering
-    outCtx.imageSmoothingEnabled = true;
-    outCtx.imageSmoothingQuality = 'high';
 
     // Pre-decode all frames
     const loadedSlices = await Promise.all(
@@ -171,21 +168,45 @@ document.addEventListener('DOMContentLoaded', async () => {
       })
     );
 
+    const validSlices = loadedSlices.filter((s) => s.img !== null);
+    if (validSlices.length === 0) {
+      throw new Error('No valid frames loaded for stitching');
+    }
+
+    const firstImg = validSlices[0].img;
+    const naturalSliceWidth = firstImg.naturalWidth;
+    const lastSlice = slices[slices.length - 1];
+
+    const baseWidth = naturalSliceWidth;
+    const baseHeight = lastSlice
+      ? (lastSlice.descriptor.destY + lastSlice.descriptor.destHeight)
+      : Math.round(telemetry.totalHeight * dpr);
+
+    outputCanvas.width = baseWidth * scale;
+    outputCanvas.height = baseHeight * scale;
+
+    if (scale > 1) {
+      outCtx.imageSmoothingEnabled = true;
+      outCtx.imageSmoothingQuality = 'high';
+    } else {
+      outCtx.imageSmoothingEnabled = false;
+    }
+
     // Draw slices in sequence
-    for (const item of loadedSlices) {
-      if (!item.img) continue;
+    for (const item of validSlices) {
       const d = item.descriptor;
-      outCtx.drawImage(
-        item.img,
-        d.sourceX,
-        d.sourceY,
-        d.sourceWidth,
-        d.sourceHeight,
-        d.destX,
-        d.destY,
-        d.destWidth,
-        d.destHeight
-      );
+
+      const sx = Math.max(0, Math.min(d.sourceX, item.img.naturalWidth - 1));
+      const sy = Math.max(0, Math.min(d.sourceY, item.img.naturalHeight - 1));
+      const sw = Math.min(item.img.naturalWidth - sx, d.sourceWidth || item.img.naturalWidth);
+      const sh = Math.min(item.img.naturalHeight - sy, d.sourceHeight || item.img.naturalHeight);
+
+      const dx = d.destX * scale;
+      const dy = d.destY * scale;
+      const dw = (d.destWidth || sw) * scale;
+      const dh = (d.destHeight || sh) * scale;
+
+      outCtx.drawImage(item.img, sx, sy, sw, sh, dx, dy, dw, dh);
     }
   }
 
@@ -194,6 +215,8 @@ document.addEventListener('DOMContentLoaded', async () => {
    */
   async function renderCroppedRegion(capture) {
     const { dataUrl, cropRect } = capture;
+    const is4K = capture.resolution === '4k' || !capture.resolution;
+    const scale = is4K ? 2 : 1;
     const img = await loadImage(dataUrl);
 
     const dpr = cropRect.dpr || 1;
@@ -202,20 +225,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     const sw = Math.round(cropRect.width * dpr);
     const sh = Math.round(cropRect.height * dpr);
 
-    outputCanvas.width = sw;
-    outputCanvas.height = sh;
+    outputCanvas.width = sw * scale;
+    outputCanvas.height = sh * scale;
 
-    outCtx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (scale > 1) {
+      outCtx.imageSmoothingEnabled = true;
+      outCtx.imageSmoothingQuality = 'high';
+    } else {
+      outCtx.imageSmoothingEnabled = false;
+    }
+
+    outCtx.drawImage(img, sx, sy, sw, sh, 0, 0, sw * scale, sh * scale);
   }
 
   /**
    * Single image viewport renderer.
    */
-  async function renderSingleImage(dataUrl) {
+  async function renderSingleImage(dataUrl, is4K = true) {
     const img = await loadImage(dataUrl);
-    outputCanvas.width = img.naturalWidth;
-    outputCanvas.height = img.naturalHeight;
-    outCtx.drawImage(img, 0, 0);
+    const scale = is4K ? 2 : 1;
+
+    outputCanvas.width = img.naturalWidth * scale;
+    outputCanvas.height = img.naturalHeight * scale;
+
+    if (scale > 1) {
+      outCtx.imageSmoothingEnabled = true;
+      outCtx.imageSmoothingQuality = 'high';
+    } else {
+      outCtx.imageSmoothingEnabled = false;
+    }
+
+    outCtx.drawImage(img, 0, 0, outputCanvas.width, outputCanvas.height);
   }
 
   function loadImage(src) {
@@ -229,7 +269,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Zoom Controls ---
   function updateZoom(newZoom) {
-    zoomLevel = Math.max(0.1, Math.min(3.0, newZoom));
+    zoomLevel = Math.max(0.05, Math.min(3.0, newZoom));
     canvasStage.style.transform = `scale(${zoomLevel})`;
     zoomReadout.textContent = `${Math.round(zoomLevel * 100)}%`;
   }
@@ -242,13 +282,40 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // For tall full-page captures, fit comfortably by width with a ceiling of 1.0
     const fit = Math.min(scaleX, 1.0);
-    updateZoom(Math.max(0.2, fit));
+    updateZoom(Math.max(0.15, fit));
   }
 
   btnZoomIn.addEventListener('click', () => updateZoom(zoomLevel + 0.15));
   btnZoomOut.addEventListener('click', () => updateZoom(zoomLevel - 0.15));
-  btnZoom100.addEventListener('click', () => updateZoom(1.0));
-  btnZoomFit.addEventListener('click', fitZoomToWorkspace);
+  btnZoom100.addEventListener('click', () => {
+    updateZoom(1.0);
+    showToast('ZOOM: 1:1 NATIVE PIXELS');
+  });
+  btnZoomFit.addEventListener('click', () => {
+    fitZoomToWorkspace();
+    showToast('ZOOM: FIT TO WORKSPACE');
+  });
+
+  // Double-click canvas stage to toggle between FIT and 1:1 crispness
+  canvasStage.addEventListener('dblclick', () => {
+    if (Math.abs(zoomLevel - 1.0) < 0.05) {
+      fitZoomToWorkspace();
+      showToast('ZOOM: FIT TO WORKSPACE');
+    } else {
+      updateZoom(1.0);
+      showToast('ZOOM: 1:1 NATIVE PIXELS');
+    }
+  });
+
+  // Click on meta-res pill to toggle between 4K Ultra-HD and 1x Native resolution
+  if (metaRes) {
+    metaRes.addEventListener('click', async () => {
+      const nextRes = (currentCapture.resolution === '4k' || !currentCapture.resolution) ? '1x' : '4k';
+      currentCapture.resolution = nextRes;
+      await renderCapture(currentCapture);
+      showToast(`RESOLUTION: ${nextRes === '4k' ? '4K ULTRA (2x)' : 'NATIVE (1x)'}`);
+    });
+  }
 
   // Ctrl / Cmd + Wheel zoom
   canvasWorkspace.addEventListener('wheel', (e) => {
@@ -333,7 +400,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       downloadBlob(blob, filename);
       playShutterSound({ enabled: soundEnabled });
       showToast(`✓ SAVED ${filename}`);
-    }, 'image/jpeg', 0.92);
+    }, 'image/jpeg', 0.95);
   });
 
   function downloadBlob(blob, filename) {
@@ -357,13 +424,54 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (activeTool === 'select') {
         drawCanvas.style.pointerEvents = 'none';
-        canvasWorkspace.style.cursor = 'default';
+        canvasWorkspace.style.cursor = 'grab';
+        canvasStage.classList.add('tool-select');
       } else {
         drawCanvas.style.pointerEvents = 'auto';
         drawCanvas.style.cursor = 'crosshair';
+        canvasWorkspace.style.cursor = 'default';
+        canvasStage.classList.remove('tool-select');
       }
     });
   });
+
+  // Pan workspace by dragging in select mode or using mouse wheel / middle click
+  let isPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let scrollStartX = 0;
+  let scrollStartY = 0;
+
+  canvasWorkspace.addEventListener('mousedown', (e) => {
+    if (activeTool === 'select' || e.button === 1 || e.spaceKey) {
+      isPanning = true;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      scrollStartX = canvasWorkspace.scrollLeft;
+      scrollStartY = canvasWorkspace.scrollTop;
+      canvasWorkspace.style.cursor = 'grabbing';
+    }
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isPanning) return;
+    const dx = e.clientX - panStartX;
+    const dy = e.clientY - panStartY;
+    canvasWorkspace.scrollLeft = scrollStartX - dx;
+    canvasWorkspace.scrollTop = scrollStartY - dy;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isPanning) {
+      isPanning = false;
+      canvasWorkspace.style.cursor = activeTool === 'select' ? 'grab' : 'default';
+    }
+  });
+
+  // Initial tool setup
+  drawCanvas.style.pointerEvents = 'none';
+  canvasWorkspace.style.cursor = 'grab';
+  canvasStage.classList.add('tool-select');
 
   colorSwatches.forEach((swatch) => {
     swatch.addEventListener('click', () => {

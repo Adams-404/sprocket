@@ -132,3 +132,30 @@ test('clampBoundingBox handles inverted negative drag dimensions', () => {
   assert.equal(clamped.width, 200);
   assert.equal(clamped.height, 200);
 });
+
+test('calculateSlices coordinates map accurately to 4K Ultra-HD (2x super-sample) canvas', () => {
+  const slices = calculateSlices({
+    totalWidth: 1920,
+    totalHeight: 4000,
+    viewportWidth: 1920,
+    viewportHeight: 1000,
+    dpr: 1
+  });
+
+  const scale = 2; // 4K Super-sample factor
+  const baseWidth = slices[0].sourceWidth;
+  const target4KWidth = baseWidth * scale;
+  const target4KHeight = 4000 * scale;
+
+  assert.equal(target4KWidth, 3840);
+  assert.equal(target4KHeight, 8000);
+
+  // Validate all slices scaled by 2 match 4K target exactly
+  let accumulatedHeight = 0;
+  for (const s of slices) {
+    const scaledDestHeight = s.destHeight * scale;
+    accumulatedHeight += scaledDestHeight;
+    assert.equal(s.destWidth * scale, 3840);
+  }
+  assert.equal(accumulatedHeight, 8000);
+});

@@ -130,14 +130,18 @@
         <label class="toggle-control" title="Toggle mechanical shutter sound">
           <input type="checkbox" id="toggle-shutter-sound" checked>
           <span class="toggle-slider"></span>
-          <span class="toggle-label">SHUTTER AUDIO</span>
+          <span class="toggle-label">AUDIO</span>
         </label>
       </div>
 
-      <div class="control-group">
+      <div class="control-group" style="gap: 5px;">
+        <select class="format-select" id="select-resolution" title="Sensor Capture Quality">
+          <option value="4k" selected>RES: 4K ULTRA</option>
+          <option value="1x">RES: NATIVE</option>
+        </select>
         <select class="format-select" id="select-format" title="Output image encoding">
-          <option value="png" selected>FORMAT: PNG</option>
-          <option value="jpeg">FORMAT: JPG (92%)</option>
+          <option value="png" selected>PNG</option>
+          <option value="jpeg">JPG</option>
         </select>
       </div>
     </footer>
