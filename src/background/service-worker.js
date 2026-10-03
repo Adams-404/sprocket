@@ -225,10 +225,23 @@ async function captureFullPage(tab, options = {}) {
     console.debug('Failed to focus tab/window:', e);
   }
 
-  // 1. Get telemetry (using direct DOM measurement)
+  const captureId = `sprocket_capture_${Date.now()}`;
+  activeCaptureSession = { id: captureId, stopRequested: false };
+
+  // 1. Prepare target page FIRST (hide scrollbars, catalog sticky elements)
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_PREPARE' });
+  } catch (e) {
+    console.debug('SPROCKET_PREPARE skipped:', e);
+  }
+
+  // Allow DOM to reflow cleanly without scrollbars
+  await new Promise((r) => setTimeout(r, 120));
+
+  // 2. Get telemetry (accurately measured on clean, full-width reflowed page)
   const telemetry = await ensureContentScript(tab.id);
 
-  // 2. Calculate frame slices
+  // 3. Calculate frame slices
   const slices = calculateSlices({
     totalWidth: telemetry.totalWidth,
     totalHeight: telemetry.totalHeight,
@@ -236,16 +249,6 @@ async function captureFullPage(tab, options = {}) {
     viewportHeight: telemetry.viewportHeight,
     dpr: telemetry.dpr
   });
-
-  const captureId = `sprocket_capture_${Date.now()}`;
-  activeCaptureSession = { id: captureId, stopRequested: false };
-
-  // 3. Prepare target page (hide scrollbars, catalog sticky elements)
-  try {
-    await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_PREPARE' });
-  } catch (e) {
-    console.debug('SPROCKET_PREPARE skipped:', e);
-  }
 
   const capturedFrames = [];
 
@@ -313,6 +316,14 @@ async function captureFullPage(tab, options = {}) {
         }
       }
 
+      // Temporarily hide Sprocket HUD from viewport before capturing frame
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_HIDE_HUD' });
+      } catch {}
+
+      // Wait 60ms for Chromium compositor to paint clean frame without HUD
+      await new Promise((r) => setTimeout(r, 60));
+
       // Capture frame safely respecting Chromium rate limit
       try {
         const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
@@ -329,6 +340,11 @@ async function captureFullPage(tab, options = {}) {
         } else {
           throw captureErr;
         }
+      } finally {
+        // Restore HUD for the user during scrolling / between frames
+        try {
+          await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_SHOW_HUD' });
+        } catch {}
       }
     }
 
@@ -415,6 +431,12 @@ async function captureVisibleViewport(tab, options = {}) {
   } catch (e) {
     console.debug('Failed to focus tab/window:', e);
   }
+
+  // Ensure any HUD is hidden before capturing viewport
+  try {
+    await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_HIDE_HUD' });
+  } catch {}
+  await new Promise((r) => setTimeout(r, 60));
 
   const dataUrl = await safeCaptureVisibleTab(tab.windowId, { format: 'png' });
   const captureId = `sprocket_capture_${Date.now()}`;

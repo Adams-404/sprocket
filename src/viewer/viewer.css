@@ -312,7 +312,7 @@ body, html {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8), 0 0 0 1px #222632;
   transition: transform 0.08s ease-out;
   transform-origin: top center;
-  background: #ffffff;
+  background: transparent;
   cursor: default;
 }
 

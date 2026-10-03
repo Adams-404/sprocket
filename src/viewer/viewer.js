@@ -196,14 +196,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     for (const item of validSlices) {
       const d = item.descriptor;
 
-      const sx = Math.max(0, Math.min(d.sourceX, item.img.naturalWidth - 1));
+      const sx = 0;
       const sy = Math.max(0, Math.min(d.sourceY, item.img.naturalHeight - 1));
-      const sw = Math.min(item.img.naturalWidth - sx, d.sourceWidth || item.img.naturalWidth);
+      const sw = item.img.naturalWidth;
       const sh = Math.min(item.img.naturalHeight - sy, d.sourceHeight || item.img.naturalHeight);
 
-      const dx = d.destX * scale;
+      const dx = 0;
       const dy = d.destY * scale;
-      const dw = (d.destWidth || sw) * scale;
+      const dw = outputCanvas.width;
       const dh = (d.destHeight || sh) * scale;
 
       outCtx.drawImage(item.img, sx, sy, sw, sh, dx, dy, dw, dh);
