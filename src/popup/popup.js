@@ -267,7 +267,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.debug('Capture error:', err);
     });
 
-    // Close the popup after audio triggers so user directly sees the page scroll & in-page HUD
+    // Close the popup after audio triggers so user directly sees the page scroll & toolbar badge
     setTimeout(() => {
       window.close();
     }, 200);

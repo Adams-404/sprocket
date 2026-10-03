@@ -103,7 +103,7 @@ async function ensureContentScript(tabId) {
     });
 
     if (execResult && execResult.result && execResult.result.totalHeight > 0) {
-      // Also inject content.js for sticky headers and HUD
+      // Also inject content.js for scrollbar suppression and sticky headers
       chrome.scripting.executeScript({
         target: { tabId },
         files: ['src/content/content.js']
@@ -235,6 +235,22 @@ async function captureFullPage(tab, options = {}) {
     console.debug('SPROCKET_PREPARE skipped:', e);
   }
 
+  // Pre-capture DOM cleanup: remove any lingering HUD elements
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        document.querySelectorAll('#sprocket-hud-banner, [id^="sprocket-hud"]').forEach((el) => el.remove());
+      }
+    });
+  } catch {}
+
+  // Update extension toolbar badge to indicate recording
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: '#ff6b35' });
+    await chrome.action.setBadgeText({ text: 'REC' });
+  } catch {}
+
   // Allow DOM to reflow cleanly without scrollbars
   await new Promise((r) => setTimeout(r, 120));
 
@@ -254,7 +270,7 @@ async function captureFullPage(tab, options = {}) {
 
   try {
     for (let i = 0; i < slices.length; i++) {
-      // Check if user clicked STOP button
+      // Check if user clicked STOP button or pressed Escape
       if (activeCaptureSession && activeCaptureSession.stopRequested) {
         console.log(`Sprocket: Capture halted early at frame ${i}/${slices.length} by user request.`);
         break;
@@ -274,7 +290,12 @@ async function captureFullPage(tab, options = {}) {
         console.debug('Tab focus check:', e);
       }
 
-      // Broadcast progress update
+      // Update toolbar action badge with live frame progress (e.g. "1/5", "2/5")
+      try {
+        await chrome.action.setBadgeText({ text: `${i + 1}/${slices.length}` });
+      } catch {}
+
+      // Broadcast progress update to popup/listeners
       chrome.runtime.sendMessage({
         action: 'SPROCKET_PROGRESS_UPDATE',
         currentFrame: i + 1,
@@ -296,7 +317,7 @@ async function captureFullPage(tab, options = {}) {
         try {
           await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: (targetY, isFirstSlice, currentFrame, totalFrames) => {
+            func: (targetY) => {
               window.scrollTo({ top: targetY, left: 0, behavior: 'instant' });
               if (document.scrollingElement) document.scrollingElement.scrollTop = targetY;
               if (document.documentElement) document.documentElement.scrollTop = targetY;
@@ -305,23 +326,16 @@ async function captureFullPage(tab, options = {}) {
               for (let c of containers) {
                 if (c.scrollHeight > window.innerHeight && c.scrollTop !== undefined) c.scrollTop = targetY;
               }
-              if (typeof window.__SPROCKET_UPDATE_HUD__ === 'function') {
-                window.__SPROCKET_UPDATE_HUD__(currentFrame, totalFrames);
-              }
+              document.querySelectorAll('#sprocket-hud-banner, [id^="sprocket-hud"]').forEach((el) => el.remove());
             },
-            args: [slice.scrollY, isFirst, i + 1, slices.length]
+            args: [slice.scrollY]
           });
         } catch (err2) {
           console.debug('Direct scroll script skipped:', err2);
         }
       }
 
-      // Temporarily hide Sprocket HUD from viewport before capturing frame
-      try {
-        await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_HIDE_HUD' });
-      } catch {}
-
-      // Wait 60ms for Chromium compositor to paint clean frame without HUD
+      // Settle pause to allow compositor to flush scrolled viewport
       await new Promise((r) => setTimeout(r, 60));
 
       // Capture frame safely respecting Chromium rate limit
@@ -340,11 +354,6 @@ async function captureFullPage(tab, options = {}) {
         } else {
           throw captureErr;
         }
-      } finally {
-        // Restore HUD for the user during scrolling / between frames
-        try {
-          await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_SHOW_HUD' });
-        } catch {}
       }
     }
 
@@ -356,6 +365,9 @@ async function captureFullPage(tab, options = {}) {
       percent: 100
     }).catch(() => {});
   } finally {
+    try {
+      await chrome.action.setBadgeText({ text: '' });
+    } catch {}
     activeCaptureSession = null;
     // Always restore page state
     try {
@@ -432,9 +444,14 @@ async function captureVisibleViewport(tab, options = {}) {
     console.debug('Failed to focus tab/window:', e);
   }
 
-  // Ensure any HUD is hidden before capturing viewport
+  // Ensure DOM is pristine before capturing viewport
   try {
-    await chrome.tabs.sendMessage(tab.id, { action: 'SPROCKET_HIDE_HUD' });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        document.querySelectorAll('#sprocket-hud-banner, [id^="sprocket-hud"]').forEach((el) => el.remove());
+      }
+    });
   } catch {}
   await new Promise((r) => setTimeout(r, 60));
 

@@ -15,7 +15,6 @@
   let originalScroll = { x: 0, y: 0 };
   let originalOverflow = null;
   let fixedStickyElements = [];
-  let hudElement = null;
   let styleLockElement = null;
 
   /**
@@ -67,11 +66,29 @@
     };
   }
 
+  function onKeyDown(e) {
+    if (e.key === 'Escape' || e.code === 'Escape') {
+      try {
+        chrome.runtime.sendMessage({ action: 'SPROCKET_STOP_CAPTURE' }).catch(() => {});
+      } catch {}
+    }
+  }
+
+  function cleanupResidualHud() {
+    try {
+      const huds = document.querySelectorAll('#sprocket-hud-banner, [id^="sprocket-hud"]');
+      huds.forEach((el) => el.remove());
+    } catch {}
+  }
+
   /**
    * Prepares the webpage for clean multi-frame capture.
    * Hides scrollbars, disables smooth scrolling, records fixed/sticky nodes.
    */
   function prepareForCapture() {
+    cleanupResidualHud();
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+
     originalScroll = {
       x: window.scrollX || window.pageXOffset || 0,
       y: window.scrollY || window.pageYOffset || 0
@@ -120,7 +137,7 @@
     const allElements = document.querySelectorAll('*');
     for (let i = 0; i < allElements.length; i++) {
       const el = allElements[i];
-      // Skip our own HUD if present
+      // Skip any Sprocket elements if present
       if (el.id && el.id.startsWith('sprocket-')) continue;
 
       const style = window.getComputedStyle(el);
@@ -132,14 +149,14 @@
         });
       }
     }
-
-    showHud('INITIALIZING EXPOSURE...', 0);
   }
 
   /**
    * Jumps to target scroll coordinates and updates sticky element visibility.
    */
   async function scrollToSlice(scrollY, isFirstSlice, currentFrame, totalFrames) {
+    cleanupResidualHud();
+
     // 1. Jump viewport directly
     window.scrollTo({ top: scrollY, left: 0, behavior: 'instant' });
     document.documentElement.scrollTop = scrollY;
@@ -167,9 +184,6 @@
       }
     }
 
-    const pct = Math.round((currentFrame / totalFrames) * 100);
-    showHud(`FRAME [${currentFrame}/${totalFrames}] — ${pct}%`, pct);
-
     // Yield for DOM repaint & dynamic component rendering
     await new Promise((resolve) => {
       requestAnimationFrame(() => {
@@ -187,6 +201,9 @@
    * Restores the page to its exact pre-capture state.
    */
   function restoreAfterCapture() {
+    window.removeEventListener('keydown', onKeyDown, { capture: true });
+    cleanupResidualHud();
+
     // Restore fixed/sticky elements
     for (const item of fixedStickyElements) {
       item.element.style.visibility = item.originalVisibility;
@@ -200,103 +217,15 @@
       styleLockElement = null;
     }
 
-    // Remove HUD
-    removeHud();
-
     // Restore user's original scroll position
     window.scrollTo(originalScroll.x, originalScroll.y);
   }
 
-  /**
-   * Renders a sleek, tactile heads-up progress badge in top right.
-   */
-  function showHud(text, percent) {
-    if (!hudElement) {
-      hudElement = document.createElement('div');
-      hudElement.id = 'sprocket-hud-banner';
-      hudElement.style.cssText = `
-        position: fixed !important;
-        top: 16px !important;
-        right: 16px !important;
-        z-index: 2147483647 !important;
-        background: #141519 !important;
-        color: #f3f4f6 !important;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
-        font-size: 11px !important;
-        letter-spacing: 0.08em !important;
-        padding: 8px 14px !important;
-        border-radius: 6px !important;
-        border: 1px solid #ff6b35 !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
-        display: flex !important;
-        align-items: center !important;
-        gap: 12px !important;
-        pointer-events: auto !important;
-        transition: opacity 0.15s ease !important;
-      `;
-      document.body.appendChild(hudElement);
-    }
-
-    hudElement.innerHTML = `
-      <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff6b35;box-shadow:0 0 8px #ff6b35;"></span>
-      <span style="font-weight:600;color:#ff6b35;">SPROCKET</span>
-      <span style="color:#9ca3af;">//</span>
-      <span>${text}</span>
-      <button id="sprocket-hud-stop-btn" style="
-        background: #ff6b35 !important;
-        color: #0b0c0f !important;
-        font-family: inherit !important;
-        font-size: 10px !important;
-        font-weight: 700 !important;
-        border: none !important;
-        border-radius: 4px !important;
-        padding: 3px 8px !important;
-        cursor: pointer !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        gap: 4px !important;
-        letter-spacing: 0.05em !important;
-      ">■ STOP &amp; STITCH</button>
-    `;
-
-    const stopBtn = hudElement.querySelector('#sprocket-hud-stop-btn');
-    if (stopBtn) {
-      stopBtn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        stopBtn.disabled = true;
-        stopBtn.textContent = 'FINISHING...';
-        chrome.runtime.sendMessage({ action: 'SPROCKET_STOP_CAPTURE' }).catch(() => {});
-      };
-    }
-  }
-
-  function removeHud() {
-    if (hudElement && hudElement.parentNode) {
-      hudElement.parentNode.removeChild(hudElement);
-      hudElement = null;
-    }
-  }
-
-  function hideHud() {
-    if (hudElement) {
-      hudElement.style.setProperty('display', 'none', 'important');
-    }
-  }
-
-  function showHudElement() {
-    if (hudElement) {
-      hudElement.style.removeProperty('display');
-    }
-  }
-
-  window.__SPROCKET_UPDATE_HUD__ = (currentFrame, totalFrames) => {
-    const pct = Math.round((currentFrame / totalFrames) * 100);
-    showHud(`FRAME [${currentFrame}/${totalFrames}] — ${pct}%`, pct);
-  };
-  window.__SPROCKET_REMOVE_HUD__ = removeHud;
-  window.__SPROCKET_HIDE_HUD__ = hideHud;
-  window.__SPROCKET_SHOW_HUD__ = showHudElement;
+  // Safe stubs to prevent errors if invoked
+  window.__SPROCKET_UPDATE_HUD__ = () => {};
+  window.__SPROCKET_REMOVE_HUD__ = cleanupResidualHud;
+  window.__SPROCKET_HIDE_HUD__ = cleanupResidualHud;
+  window.__SPROCKET_SHOW_HUD__ = () => {};
 
   // Communication interface with extension service worker and popup
   window.__SPROCKET_MESSAGE_LISTENER__ = (message, sender, sendResponse) => {
@@ -313,14 +242,8 @@
       return false;
     }
 
-    if (message.action === 'SPROCKET_HIDE_HUD') {
-      hideHud();
-      sendResponse({ success: true });
-      return false;
-    }
-
-    if (message.action === 'SPROCKET_SHOW_HUD') {
-      showHudElement();
+    if (message.action === 'SPROCKET_HIDE_HUD' || message.action === 'SPROCKET_SHOW_HUD') {
+      cleanupResidualHud();
       sendResponse({ success: true });
       return false;
     }
